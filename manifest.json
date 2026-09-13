@@ -1,0 +1,16 @@
+{
+  "name": "complete-job-search-pipeline",
+  "version": "3.2.0",
+  "maturity": "production",
+  "entrypoint": "SKILL.md",
+  "agent_instructions": "AGENTS.md",
+  "dashboard": {
+    "included_in_core_package": false,
+    "expected_path_after_merge": "dashboard/",
+    "integration_guide": "docs/dashboard-integration.md"
+  },
+  "source_of_truth": "workspace/<target-role-slug>/jobs.csv",
+  "optional_integrations": ["lark-cli:base"],
+  "required_runtime": {"node": ">=20"},
+  "browser_preference": "Control the in-app browser"
+}

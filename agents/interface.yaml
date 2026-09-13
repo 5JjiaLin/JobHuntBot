@@ -1,0 +1,22 @@
+interface:
+  display_name: "Complete Job Search Pipeline"
+  short_description: "研究真实 JD、基于经历生成简历、找当前岗位并建立投递工作区"
+  default_prompt: "Use $complete-job-search-pipeline and follow AGENTS.md to run my end-to-end job search workflow."
+compatibility:
+  canonical_format: "agent-skills"
+  adapter_targets:
+    - "openai"
+    - "generic"
+  activation:
+    mode: "manual"
+    paths: []
+  execution:
+    context: "inline"
+  requirements:
+    live_browser: "Prefer Control the in-app browser for dynamic recruitment sites and current JD verification"
+    runtime: "Node.js >=20 for workspace initialization and the merged local dashboard"
+  trust:
+    remote_inline_execution: "forbid"
+    secrets: "Use official lark-cli auth; never request or persist Feishu App Secret or OAuth tokens in JobHuntBot"
+    job_links: "verify before claiming current/official"
+    dashboard_merge: "Preserve the user's existing dashboard source and UI; integrate data contracts instead of regenerating it"

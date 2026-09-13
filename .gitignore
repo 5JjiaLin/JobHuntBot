@@ -1,3 +1,42 @@
-my-materials/
+# ---- OS / editor ----
 .DS_Store
-Thumbs.db
+*.log
+
+# ---- secrets / env ----
+.env
+.env.*
+!.env.example
+
+# ---- dependencies ----
+node_modules/
+
+# ---- REAL user job-search data: never commit to a public repo ----
+# The local workspace holds the real, private job pool + per-user notes.
+workspace/*
+!workspace/.gitkeep
+
+# Root-level real user profile / experience / resume / answer / rules data.
+candidate_profile.json
+experience_bank.md
+answer_bank.md
+application_rules.md
+resume_routing.md
+
+# Dashboard runtime data. The dashboard reads the workspace, so its own CSVs
+# are either real data or inert copies — exclude all of them. Only the
+# dashboard *source* (server.js, app.js, dashboard.html, styles.css,
+# config.json, start scripts) is committed.
+dashboard/*.csv
+dashboard/*.md
+dashboard/_backup_*/
+dashboard/*.local.*
+dashboard/auth*.json
+dashboard/*token*
+
+# ---- one-off migration helper / local backups (not part of the project) ----
+_migrate.py
+_backup_*/
+
+# ---- temporary feishu/lark sync artifacts ----
+.tmp/
+*.ndjson

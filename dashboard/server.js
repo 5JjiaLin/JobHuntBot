@@ -10,13 +10,64 @@ const fs = require('fs');
 const path = require('path');
 
 const PORT = 8420;
-const ROOT = __dirname;
-const JOB_POOL_PATH = path.join(ROOT, 'job_pool.csv');
-const FOLLOW_UP_PATH = path.join(ROOT, 'follow_up.csv');
+const ROOT = __dirname; // the dashboard/ folder
+
+// Single source of truth: workspace/<target-role-slug>/jobs.csv.
+// dashboard/config.json may set `workspace_dir` (relative to this folder) and
+// `target_role`. If absent, fall back to this folder so the server still boots,
+// but the canonical data lives in the workspace, never in a second copy.
+let WORKSPACE_DIR = ROOT;
+try {
+  const cfg = JSON.parse(fs.readFileSync(path.join(ROOT, 'config.json'), 'utf8'));
+  if (cfg && typeof cfg.workspace_dir === 'string' && cfg.workspace_dir) {
+    WORKSPACE_DIR = path.resolve(ROOT, cfg.workspace_dir);
+  }
+} catch (e) {
+  // no config.json — fall back to reading job_pool.csv from this folder
+}
+
+const JOB_POOL_PATH = path.join(WORKSPACE_DIR, 'jobs.csv');
+const FOLLOW_UP_PATH = path.join(WORKSPACE_DIR, 'follow_up.csv');
+
+// The dashboard UI fetches these filenames; serve them from the workspace so
+// the front-end code stays unchanged while the real data lives in workspace/.
+const DATA_FILE_MAP = {
+  'job_pool.csv': 'jobs.csv',
+  'follow_up.csv': 'follow_up.csv',
+  'application_log.csv': 'application_log.csv',
+  'blocker_queue.csv': 'blockers.csv',
+};
+
+// Canonical headers for the workspace data files. On a fresh clone the
+// workspace may not exist yet; create the directory and header-only CSVs so
+// the dashboard boots and the UI can write without a prior init run. Existing
+// files (real data) are never overwritten.
+const WORKSPACE_HEADERS = {
+  'jobs.csv': ['job_id','date_found','company','job_title','role_family','level','convert_track','location','remote_policy','source','job_url','posted_date','priority','status','resume_variant','skip_reason','blocker','next_action','notes','cohort_match_status','current_stage','验证置信度','submission_tier','company_tier','job_type','deadline','match_score','hard_gate','verification_status','applied_date'],
+  'follow_up.csv': ['date','company','job_title','contact','channel','event_type','deadline','next_action','status','notes','time'],
+  'blockers.csv': ['blocker_id','job_id','type','reason','next_action','status','created_at','resolved_at'],
+  'application_log.csv': ['attempt_date','company','job_title','job_url','platform','status','submission_evidence','resume_used','answers_used','confirmation_url','confirmation_text','notes'],
+};
+
+function ensureWorkspace() {
+  try {
+    fs.mkdirSync(WORKSPACE_DIR, { recursive: true });
+    for (const [file, header] of Object.entries(WORKSPACE_HEADERS)) {
+      const p = path.join(WORKSPACE_DIR, file);
+      if (!fs.existsSync(p)) {
+        writeCSVRows(p, header, []);
+        console.log('Created empty workspace file: ' + p);
+      }
+    }
+  } catch (e) {
+    console.warn('Could not initialize workspace directory: ' + e.message);
+  }
+}
 
 const MIME = {
   '.html': 'text/html; charset=utf-8',
   '.js': 'text/javascript; charset=utf-8',
+  '.css': 'text/css; charset=utf-8',
   '.csv': 'text/csv; charset=utf-8',
   '.json': 'application/json; charset=utf-8',
 };
@@ -54,13 +105,18 @@ function stringifyCSV(rows) {
 }
 
 function readCSVRows(filePath) {
-  const text = fs.readFileSync(filePath, 'utf8');
+  let text = fs.readFileSync(filePath, 'utf8');
+  // Strip ALL leading UTF-8 BOMs. job_pool.csv can accumulate stacked BOM
+  // bytes from repeated external writes; one stray BOM turns the first
+  // header cell into "\ufeffdate" and breaks every indexOf-based lookup,
+  // so we loop until none remain (instead of removing a single one).
+  while (text.charCodeAt(0) === 0xFEFF) text = text.slice(1);
   const rows = parseCSV(text);
   return { header: rows[0], dataRows: rows.slice(1) };
 }
 
 function writeCSVRows(filePath, header, dataRows) {
-  fs.writeFileSync(filePath, stringifyCSV([header, ...dataRows]));
+  fs.writeFileSync(filePath, '\uFEFF' + stringifyCSV([header, ...dataRows]));
 }
 
 function readJSONBody(req) {
@@ -95,8 +151,8 @@ async function handleUpdateStatus(req, res) {
   }
 
   const { rowIndex, company, job_title, status } = payload || {};
-  if (!['Offer', 'Rejected'].includes(status)) {
-    return sendJSON(res, 400, { ok: false, error: 'status must be Offer or Rejected' });
+  if (!['Submitted', 'Offer', 'Rejected', 'Pending'].includes(status)) {
+    return sendJSON(res, 400, { ok: false, error: 'status must be one of Submitted/Offer/Rejected/Pending' });
   }
   if (!Number.isInteger(rowIndex) || rowIndex < 0) {
     return sendJSON(res, 400, { ok: false, error: 'rowIndex must be a non-negative integer' });
@@ -332,8 +388,57 @@ async function handleCalendarDelete(req, res) {
   sendJSON(res, 200, { ok: true });
 }
 
+// Resolve a blocker: clear the job_pool.csv `blocker` column and reset
+// next_action so the job leaves the "阻塞项" page. Only the two columns are
+// touched — status / priority / tier / notes are left intact.
+async function handleBlockerResolve(req, res) {
+  let payload;
+  try {
+    payload = await readJSONBody(req);
+  } catch (e) {
+    return sendJSON(res, 400, { ok: false, error: e.message });
+  }
+
+  const { rowIndex, company, job_title } = payload || {};
+  if (!Number.isInteger(rowIndex) || rowIndex < 0) {
+    return sendJSON(res, 400, { ok: false, error: 'rowIndex must be a non-negative integer' });
+  }
+
+  let header, dataRows;
+  try {
+    ({ header, dataRows } = readCSVRows(JOB_POOL_PATH));
+  } catch (e) {
+    return sendJSON(res, 500, { ok: false, error: 'Could not read job_pool.csv: ' + e.message });
+  }
+  const cCol = header.indexOf('company');
+  const tCol = header.indexOf('job_title');
+  const bCol = header.indexOf('blocker');
+  const nCol = header.indexOf('next_action');
+  if ([cCol, tCol, bCol, nCol].includes(-1)) {
+    return sendJSON(res, 500, { ok: false, error: 'job_pool.csv is missing an expected column' });
+  }
+  if (rowIndex >= dataRows.length) {
+    return sendJSON(res, 409, { ok: false, error: 'rowIndex out of range — the file may have changed, please refresh' });
+  }
+  const target = dataRows[rowIndex];
+  if (target[cCol] !== company || target[tCol] !== job_title) {
+    return sendJSON(res, 409, { ok: false, error: 'This row no longer matches — the dashboard data changed, please refresh and try again' });
+  }
+
+  target[bCol] = '';
+  target[nCol] = '待投递(阻塞已解决)';
+
+  try {
+    writeCSVRows(JOB_POOL_PATH, header, dataRows);
+  } catch (e) {
+    return sendJSON(res, 500, { ok: false, error: 'Could not write job_pool.csv: ' + e.message });
+  }
+  sendJSON(res, 200, { ok: true });
+}
+
 const ROUTES = {
   '/api/update-status': handleUpdateStatus,
+  '/api/blocker/resolve': handleBlockerResolve,
   '/api/calendar/add': handleCalendarAdd,
   '/api/calendar/update': handleCalendarUpdate,
   '/api/calendar/delete': handleCalendarDelete,
@@ -354,10 +459,16 @@ const server = http.createServer((req, res) => {
   }
 
   const servedPath = urlPath === '/' ? '/dashboard.html' : urlPath;
-  const filePath = path.join(ROOT, servedPath);
+  const baseName = path.basename(servedPath);
 
-  // Prevent escaping the dashboard folder.
-  if (!filePath.startsWith(ROOT)) {
+  // Data files are served from the workspace so the workspace stays the only
+  // writable source; everything else is served from the dashboard folder.
+  const filePath = DATA_FILE_MAP[baseName]
+    ? path.join(WORKSPACE_DIR, DATA_FILE_MAP[baseName])
+    : path.join(ROOT, servedPath);
+
+  // Prevent escaping the allowed roots (dashboard folder or workspace folder).
+  if (!filePath.startsWith(ROOT) && !filePath.startsWith(WORKSPACE_DIR)) {
     res.writeHead(403);
     res.end('Forbidden');
     return;
@@ -377,6 +488,10 @@ const server = http.createServer((req, res) => {
     res.end(content);
   });
 });
+
+// Make sure the workspace data files exist before serving, so a fresh clone
+// with no real data still boots cleanly. This never touches existing files.
+ensureWorkspace();
 
 // Bind to localhost only — this server can now write to job_pool.csv, so it
 // shouldn't be reachable from other devices on the network.

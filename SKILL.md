@@ -1,127 +1,169 @@
 ---
-name: jobhuntbot
-description: "A reusable job application workflow for Codex and other AI agents. Use when a user wants to set up or run an AI-assisted job search system: collecting a candidate profile, creating an application dashboard, defining screening and resume-routing rules, finding and ranking job leads, applying to jobs within explicit safety boundaries, recording outcomes, triaging blockers, or iterating a job application workflow."
+name: complete-job-search-pipeline
+version: "3.2.0"
+description: >
+  完整求职流水线：围绕目标岗位研究真实 JD、提炼岗位核心能力、从真实经历生成并审计定制简历、
+  搜索当前可投岗位并建立持续投递工作区。覆盖多数实习、校招和社招岗位，也用于“帮我完整找工作”
+  “研究岗位后做简历再找职位”“建立求职投递看板”一类请求。不用于只润色现成简历、只解释单个 JD、
+  单纯面试模拟或泛泛职业规划。
+user_invocable: true
+metadata:
+  maturity: production
 ---
 
-# JobHuntBot
+# Complete Job Search Pipeline
 
-JobHuntBot is a job application operating workflow for AI agents. It helps users turn job searching into a repeatable system: profile, dashboard, screening rules, resume strategy, application execution, blocker triage, and follow-up.
+## Owns
 
-## Core Contract 
+把求职变成一个可持续推进的 5 阶段闭环：
 
-Optimize for truthful, traceable, interview-generating applications, not blind volume.
+`目标岗位 → 市场/JD 建模 → 真实经历 → 定制简历 → 当前岗位匹配 → 投递工作台`
 
-Treat setup as an agent-led onboarding flow, not a user homework packet. Ask only for the minimum information needed to start safely, create drafts/templates for the user, then iterate after the first trial run.
+核心原则：**岗位要求来自当前真实 JD，简历内容来自真实经历，岗位推荐来自当前可验证页面，投递状态落在一个持续更新的工作区。**
 
-Before searching or applying, make sure the user has:
+## Required browser capability
 
-1. A candidate profile.
-2. A dashboard or workbook for tracking outcomes.
-3. Application screening rules.
-4. A resume strategy.
-5. Clear safety boundaries for browser automation and form answers.
+阶段 1 和阶段 4 优先使用 **Control the in-app browser**。
 
-If any source is missing, initialize it first. Do not guess identity, legal, work authorization, compensation, current employment, sponsorship, relocation, or other high-impact facts.
+原因：招聘官网大量使用 SPA、JavaScript 动态加载、登录态、交互式岗位搜索和浏览器访问校验。真实浏览器能像用户一样打开、点击、搜索和读取渲染后的 JD，通常比只做 HTTP 抓取更可靠。
+
+规则：
+- 搜索摘要只用于发现线索，不能代替完整 JD；
+- 优先公司官方招聘站 / 官方 ATS；
+- 遇到登录、验证码、权限或访问限制时标记 `Needs user`，不得绕过限制；
+- 浏览器能力不可用时，不得用旧知识冒充“当前岗位已验证”。
+
+具体研究规则见 [role-research.md](references/role-research.md) 与 [job-matching.md](references/job-matching.md)。
+
+## Entry
+
+先确认唯一核心输入：**目标岗位**。
+
+若用户已提供，直接开始，不重复询问。求职类型、地区、毕业时间等仅在会改变搜索与资格判断时再问一个必要问题。
 
 ## Workflow
 
-### 1. Initialize the System
+### Phase 1 · Role market model
 
-Read `references/setup-workflow.md` when:
+读取 [role-research.md](references/role-research.md)。
 
-- The user is installing JobHuntBot for the first time.
-- The user asks to create a profile, dashboard, rules, templates, or GitHub-ready setup.
-- The user has not provided enough information for safe applications.
+必须：
+- 建立目标行业大厂 / 中厂 / 小厂公司池；
+- 跨公司、跨梯队读取多个同类完整 JD；
+- 输出岗位定义、5–8 项 Core 能力、Hard Gates、Common Skills、Plus 与梯队差异；
+- 所有关键结论保留 JD 证据和链接。
 
-Use the templates in `templates/` to create user-owned files:
+**Gate A：**能力模型没有足够真实 JD 证据，不进入确定版简历。
 
-- `candidate_profile.template.json`
-- `application_rules.template.md`
-- `resume_routing.template.md`
-- `answer_bank.template.md`
-- `experience_bank.template.md`
-- `dashboard-template/*.csv`
+### Phase 2 · Experience source
 
-### 2. Confirm the Company and Research the Opening
+读取 [experience-input.md](references/experience-input.md)。
 
-When the user names a specific company (or you're evaluating one you found), work it one company at a time:
+- 用户已有《个人经历.md》、旧简历、项目材料：读取并核验。
+- 用户没有足够经历事实：读取 [experience-miner-prompt.md](assets/experience-miner-prompt.md)，把 Prompt 完整交给用户，让其在 GPT 中完成经历深挖并带回 MD 文件。
 
-- Check whether the company already has a row in `job_pool`. If not, add one (role family, target city, etc.) before doing anything else — every company you touch should be traceable in the dashboard.
-- Confirm whether the target class/届 recruiting cycle is actually open, not just "the company has a careers page." Search the company's own official site/campus portal first for the specific application entry point (not just the homepage). Cross-check with a general web search to corroborate posting dates and see if the role is still live.
-- Watch for the "internship confirmed, full-time not confirmed" trap and the "届/year label doesn't match the actual eligibility window" trap — both have burned real trials. Don't mark a role as confirmed-open on a hedge-word search summary; write down the actual eligibility text.
-- Write findings back into `job_pool` immediately (job_url, next_action, notes, and a status update if warranted) — don't hold research in your head until the end of the session.
-- If you add a structured status column to `job_pool` for tracking a specific recurring question (e.g. whether a hiring cycle is confirmed open), set it explicitly every time you finish checking a row rather than leaving the dashboard to infer it from free-text `notes` — notes-based regex guessing quietly rots into false positives once notes get detailed. A stale structured column means the dashboard won't reflect what you just learned, even after a refresh.
+**Gate B：**没有可核验经历事实，不生成简历。
 
-### 3. Screen Before Applying
+### Phase 3 · Resume build
 
-Prioritize jobs by freshness, fit, feasibility, and conversion likelihood. Default to fresh jobs from the last 24 hours, then 48 hours if needed.
+读取 [resume-engine.md](references/resume-engine.md) 与 [evidence-rules.md](references/evidence-rules.md)。
 
-Skip or defer roles that violate the user's rules, are clearly overleveled, are closed or duplicate, require unsupported work authorization, need missing materials, or involve long account-heavy flows with weak fit.
+必须先建立“岗位能力 × 经历证据矩阵”，再筛项目、组织 STAR / 反向 STAR、生成简历并做事实/数字/权责/AI 贡献审计。
 
-### 4. Shortlist Specific Positions and Let the User Choose
+**Gate C：**高风险真实性问题未处理，不进入实时找岗。
 
-Once a company's opening is confirmed, don't jump straight to filling out a form. Find the *specific* postings that match the user's target role families (search the portal by keyword — job categories on a careers site often don't literally say "supply chain" even when a matching role exists) and present a short list: title, one-line fit summary, level/eligibility, location, and whether it's full-time campus recruiting (not an internship or a stale prior-cycle posting).
+### Phase 4 · Live job matching
 
-If a company limits applicants to one or two total submissions in the cycle, say so before the user picks — it changes the decision. Let the user pick which posting to pursue; only proceed on your own initiative if the user has already named the exact posting.
+读取 [job-matching.md](references/job-matching.md)。
 
-### 5. Match Experience to the Role
+回到 Phase 1 公司池逐家查当前岗位：
 
-Before touching the application, decide which of the candidate's experiences to actually feature for this specific posting — this is a separate decision from which resume file to use.
+`官方站搜索 → 浏览器打开完整 JD → Hard Gate → 0–100 可解释评分 → S/A/B/blocked → 写入工作区`
 
-- Check `experience_bank.md` (created from `templates/experience_bank.template.md` during setup) for the target role family's candidate pool — it deliberately keeps a wide, overlapping pool per role family (aim for 3-5 internships + 3+ projects rated `强`/`中`, fewer only where the candidate's real background is genuinely thin in that direction) rather than one narrow "owned" set, since closely related role families usually share supporting evidence.
-- Read this posting's actual JD and pick 2-4 experiences from that candidate pool that best fit it — favor `强` matches, but a `中` match that happens to hit something the JD specifically calls out can outrank a `强` match that doesn't. If the JD emphasizes something the whole pool underrepresents, pull in a different experience from the full inventory instead of forcing a weak fit.
-- **Before using them, tell the user which experiences (internships and projects) were selected for this application and why.** Keep it short (a list of names + one-line reasoning), but always surface it as a checkpoint — don't silently pick and move on.
-- Use the selected 2-4 experiences — not the full inventory — when answering resume-adjacent free-text fields: "relevant experience/project" custom questions, self-evaluation/cover-letter fields (synthesize personality + the selected experiences + this specific company/role fit; don't dump a generic bio), and Precision-mode resume bullet emphasis.
-- After submitting, note which experiences were actually used in `application_log`'s notes — this lets a later application to a similar role or company reuse the same reasoning instead of re-deriving it.
-- Same truthfulness rule as everywhere else: reorder, select, and emphasize freely; never invent, exaggerate, or stretch an experience to make it look like a better fit than it is. If nothing in the bank fits well, say so and use the closest honest match.
+**Gate D：**未打开岗位详情或无法确认来源时，不得标“官方已验证可投”。
 
-### 6. Route the Resume Strategy
+### Phase 5 · Application workspace
 
-Use the user's chosen strategy:
+读取 [application-workspace.md](references/application-workspace.md)。
 
-- Precision mode: screen for high-fit jobs first, then tailor resume/materials before applying.
-- Volume mode: use prebuilt resume variants by role family and move quickly.
+把阶段 4 的岗位写入 `workspace/<target-role-slug>/`，持续记录：
+- 今日行动；
+- 岗位池；
+- 投递状态；
+- 面试/测评日程；
+- 阻塞项；
+- Offer / Rejected / Closed。
 
-Default to Volume mode unless the user explicitly asks for Precision. Individual high-fit roles can be promoted from Volume to Precision.
+本地工作区数据是唯一真源。
 
-Never fabricate experience, credentials, degrees, employers, dates, work authorization, or portfolio artifacts.
+如果当前仓库已经有 Web Dashboard 源码，读取 [dashboard-integration.md](docs/dashboard-integration.md)，**保留现有已确认 UI 与交互，不用本 Skill 包里的文档去覆盖现成看板**，只做数据契约和路径对接。
 
-### 7. Fill Out the Application
+> 本 Core 包故意不包含 Web Dashboard 源码。它用于和用户当前已经修改完成的 Dashboard 合并。
 
-Read `references/application-playbook.md` before operating browser-based applications, LinkedIn Easy Apply, Simplify, Greenhouse, Lever, Ashby, Workday, or other ATS flows.
+完成本地工作台后，只问一个可选分支：**是否需要同步到飞书多维表格用于手机查看/共享？**
 
-Prefer uploading the resume first and letting the ATS auto-parse it — it's less error-prone than hand-typing education/experience. Fill whatever you confidently can from `candidate_profile.json`, `resume_routing.md`, `experience_bank.md` (for relevant-experience/self-evaluation fields, using the combo picked in step 5), and `answer_bank.md`. Stop and ask the user (don't guess) for anything on the `never_guess` list, anything requiring a subjective call, or anything the form surfaces that isn't backed by the résumé or profile (auto-filled bio text from a saved account, for instance) — verify it's true before letting it ride into a real submission.
+若需要，读取 [feishu-sync.md](references/feishu-sync.md)。飞书默认通过官方 `larksuite/cli` 连接：先复用已有登录态，未授权时由 Codex 发起 `base` 域 OAuth split-flow，让用户只在浏览器完成一次授权，再由 Agent 完成 device-code 登录。飞书仅做 Local → Feishu 单向 Upsert 镜像，不作为第二真源；JobHuntBot 不接收或保存 App Secret / OAuth token。
 
-Stop or hand off for CAPTCHA, Cloudflare, anti-bot checks, login or 2FA, unclear legal/identity questions, missing files, payment prompts, permission prompts, or anything that would require bypassing a site control.
+## Workspace contract
 
-### 8. Preview, User Confirms, Submit
+每个目标岗位使用一个目录：
 
-Before the final submit click, show the user a summary (company, role, resume version, the internship/project experiences selected in step 5, key answers, compensation figures). **Do not click final submit until the user explicitly says to** — a preview screen is not consent. After submitting, look for real confirmation evidence (success text, a thank-you/confirmation URL, a candidate ID) before recording anything as `Submitted`.
+```text
+workspace/<target-role-slug>/
+├── 01_role_market.md
+├── 02_evidence_matrix.md
+├── 03_resume.md
+├── 04_resume_audit.md
+├── jobs.csv
+├── 06_application_priority.md
+├── application_log.csv
+├── follow_up.csv
+├── blockers.csv
+└── config.json
+```
 
-### 9. Sync Everything — Dashboard and Profile
+初始化工作区优先运行：
 
-Every job lead or attempt must end in one of these states:
+```bash
+npm run init:workspace -- "<目标岗位>"
+```
 
-- `Submitted`: explicit confirmation was seen.
-- `Skipped`: not worth applying, with reason.
-- `Blocked`: automation could not proceed, with blocker and next step.
-- `Needs user`: user must provide a missing high-impact fact, complete CAPTCHA/login/upload, answer a sensitive question, or make a required judgment before the agent can decide.
-- `Pending`: selected for later action because it appears worth reviewing or applying after known prerequisites are satisfied.
+本包附带零依赖初始化脚本。若仓库已存在 `dashboard/config.json`，脚本会在不覆盖其他配置的前提下尝试写入 `workspace_dir` 与 `target_role`；若 Dashboard 使用别的配置方式，则按 [dashboard-integration.md](docs/dashboard-integration.md) 对接。
 
-Count only confirmed submissions. Saved jobs, trackers, autofill badges, or "quick apply" labels do not count.
+## Global rules
 
-For a first trial or demo run, default to lead finding only: find, screen, classify, and update the dashboard without opening real application flows or submitting anything. In lead-finding-only runs, update `job_pool`, `daily_dashboard`, `blocker_queue`, and `automation_rules` as needed; leave `application_log` empty because no application attempt occurred.
+始终遵守 [evidence-rules.md](references/evidence-rules.md)：
+- 不编经历、技能、数字、岗位、URL、岗位 ID、截止日期或招聘状态；
+- Demo ≠ 上线；团队结果 ≠ 个人结果；AI 生成 ≠ 用户本人设计；
+- Hard Gate 先于匹配分；
+- 公司名气不参与匹配分；
+- 第三方页面只做发现，官网未确认不得升级为“官方已验证”。
 
-For a real submission, update the same dashboard files (`job_pool` status, `application_log` with the resume version/evidence/answers used, `follow_up` if a next step is already known, `daily_dashboard` summary) *and* the candidate's own profile: if filling the form surfaced a fact that isn't already in `candidate_profile.json` (a new internship detail, an updated exam/grade result, a preference the user stated on the spot, anything), write it back into the profile before moving on — don't let it live only in the one application you just filed. Same discipline as everywhere else in this skill: record what you've confirmed, don't invent what you haven't.
+## Dashboard integration contract
 
-When recording a submission in `application_log`, also capture the full job description text (responsibilities and requirements) from the official posting into the `job_description` field, copied verbatim from the source — not summarized or paraphrased. This is what makes later interview prep possible without having to re-find a posting that may since have been taken down.
+若合并目标仓库已有 Dashboard：
+- 当前 Dashboard 源码和用户刚确认的 UI 是优先保留对象；
+- 不重新生成 Dashboard，不把旧 UI 规范覆盖回去；
+- 只解决工作区路径、CSV 字段、状态写回和启动方式的衔接；
+- 若旧数据仍在 `dashboard/job_pool.csv`，先备份并设计一次性迁移/兼容层，不能长期维护两个真源；
+- 完成后使用浏览器实际验收。
 
-### 10. Learn From Blockers
+完整规则见 [dashboard-integration.md](docs/dashboard-integration.md)。
 
-After each run, summarize blockers and convert repeated issues into rules. JobHuntBot should improve through use: address matching, dropdown handling, resume upload checks, account/session checks, and ATS-specific lessons belong in the dashboard and rules.
+## Completion
 
-## Safety
+完整流程只有同时满足以下条件才算完成：
+1. Core 能力模型有跨公司真实 JD 证据；
+2. 简历核心能力词都有真实经历证据或明确缺口；
+3. 简历审计不存在未处理的高风险夸大；
+4. 最终岗位逐条有来源、验证状态、匹配理由和风险；
+5. S/A/B 有官方单岗页或明确标注的官方登录/SPA 入口；
+6. 当前岗位已经写入工作区；若仓库有 Dashboard，则 Dashboard 能读取并推进这些岗位；
+7. 飞书若启用，使用官方 `lark-cli` 用户授权，同一 `job_id` 二次同步不产生重复记录，且本地不保存 OAuth token / App Secret。
 
-Read `references/safety-and-boundaries.md` when the user asks about automation limits, CAPTCHA, email verification, account login, privacy, public sharing, or what should not be included in a repo.
+## Near-neighbor exclusions
 
-Do not publish or copy private resumes, phone numbers, emails, addresses, immigration documents, application history, browser sessions, cookies, OTPs, or user-specific secrets into a public JobHuntBot package.
+- 单纯简历润色：不强制跑完整流程。
+- 单个 JD 解读：直接解释该 JD。
+- 面试模拟、谈薪、内推话术：不属于主流程。
+- 医疗、法律、科研、纯艺术等强资质/作品集岗位：只做通用部分，并明确需要额外专业规则。
