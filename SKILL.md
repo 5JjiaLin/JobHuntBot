@@ -1,6 +1,6 @@
 ---
 name: complete-job-search-pipeline
-version: "3.2.0"
+version: "1.0.0"
 description: >
   完整求职流水线：围绕目标岗位研究真实 JD、提炼岗位核心能力、从真实经历生成并审计定制简历、
   搜索当前可投岗位并建立持续投递工作区。覆盖多数实习、校招和社招岗位，也用于“帮我完整找工作”
