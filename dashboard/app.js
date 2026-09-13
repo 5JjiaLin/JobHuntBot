@@ -194,21 +194,21 @@
   // ---------------- write ops ----------------
   async function doMarkSubmitted(r, status) {
     toast('处理中…');
-    const res = await apiPost('/api/update-status', { rowIndex: r.__rowIndex, company: r.company, job_title: r.job_title, status });
+    const res = await apiPost('/api/update-status', { job_id: r.job_id, company: r.company, job_title: r.job_title, status });
     if (!res.ok) { toast('失败：' + res.error, 'err'); return; }
     toast(status === 'Submitted' ? '已标记为已投递' : (status === 'Pending' ? '已撤销' : '已更新状态'), 'ok');
     await refreshData(); renderAll();
   }
   async function doMarkEnded(r, status) {
     toast('处理中…');
-    const res = await apiPost('/api/update-status', { rowIndex: r.__rowIndex, company: r.company, job_title: r.job_title, status });
+    const res = await apiPost('/api/update-status', { job_id: r.job_id, company: r.company, job_title: r.job_title, status });
     if (!res.ok) { toast('失败：' + res.error, 'err'); return; }
     toast(status === 'Offer' ? '已标记为 Offer 🎉' : '已标记为已挂', 'ok');
     await refreshData(); renderAll();
   }
   async function doResolve(r) {
     toast('处理中…');
-    const res = await apiPost('/api/blocker/resolve', { rowIndex: r.__rowIndex, company: r.company, job_title: r.job_title });
+    const res = await apiPost('/api/blocker/resolve', { job_id: r.job_id, company: r.company, job_title: r.job_title });
     if (!res.ok) { toast('失败：' + res.error, 'err'); return; }
     toast('阻塞已解决', 'ok');
     await refreshData(); renderAll();
@@ -535,8 +535,8 @@
     err.classList.add('hidden');
     toast('保存中…');
     const body = calEditing !== null
-      ? { followUpRowIndex: calEditing, jobRowIndex: calSelectedJob.__rowIndex, company: calSelectedJob.company, job_title: calSelectedJob.job_title, date, time, event_type }
-      : { jobRowIndex: calSelectedJob.__rowIndex, company: calSelectedJob.company, job_title: calSelectedJob.job_title, date, time, event_type };
+      ? { followUpRowIndex: calEditing, job_id: calSelectedJob.job_id, company: calSelectedJob.company, job_title: calSelectedJob.job_title, date, time, event_type }
+      : { job_id: calSelectedJob.job_id, company: calSelectedJob.company, job_title: calSelectedJob.job_title, date, time, event_type };
     const res = await apiPost(calEditing !== null ? '/api/calendar/update' : '/api/calendar/add', body);
     if (!res.ok) { err.textContent = '保存失败：' + res.error; err.classList.remove('hidden'); return; }
     toast('日程已保存', 'ok');
@@ -565,7 +565,7 @@
         html += '<div class="blk-group-title">' + g + ' · ' + groups[g].length + '</div>';
         groups[g].forEach(r => {
           html += `
-            <div class="blk-card">
+            <div class="blk-card" data-job-id="${esc(r.job_id || '')}">
               <div style="min-width:0">
                 <div class="jr-company">${esc(r.company)} · ${esc(r.job_title)}</div>
                 <div class="blk-reason">${esc(blockerReason(r).slice(0, 60))}</div>
@@ -582,7 +582,9 @@
     }
     el.innerHTML = html;
     el.querySelectorAll('.blk-card').forEach((card, i) => {
-      const r = list.find(x => x.company + x.job_title === card.querySelector('.jr-company').textContent);
+      const r =
+        list.find(x => x.job_id && x.job_id === card.getAttribute('data-job-id')) ||
+        list.find(x => x.company + ' · ' + x.job_title === card.querySelector('.jr-company').textContent);
       card.querySelector('[data-act="detail"]').addEventListener('click', () => openDrawer(r));
       const sb = card.querySelector('[data-act="site"]'); if (sb) sb.addEventListener('click', () => { if (r.job_url) window.open(r.job_url, '_blank'); });
       card.querySelector('[data-act="resolve"]').addEventListener('click', () => doResolve(r));

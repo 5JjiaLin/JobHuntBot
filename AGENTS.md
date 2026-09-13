@@ -11,25 +11,18 @@
 5. 本地工作区是数据真源；Web Dashboard 是操作界面；飞书是流程完成后的可选镜像。
 6. **如果当前仓库已经有用户修改完成的 Dashboard，绝对不要用模板或旧设计覆盖它。**先读 `docs/dashboard-integration.md` 再做衔接。
 
-## Core package boundary
+## Repository shape
 
-本 Core 包**故意不包含 Web Dashboard 源码**。
-
-它通常会被合并进一个已经包含：
+JobHuntBot is a **complete project**, not a partial package:
 
 ```text
-dashboard/
+Skill + Workspace + Dashboard (+ optional Feishu mirror)
 ```
 
-的现有 JobHuntBot 项目。
-
-合并时：
-- 保留现有 `dashboard/` 源码；
-- 不回滚 UI；
-- 不根据旧截图重新设计；
-- 不删除现有业务数据；
-- 只把 Skill、Agent 指令、References、Workspace 初始化与飞书流程并入根目录；
-- 再按 `docs/dashboard-integration.md` 对齐数据契约。
+- `dashboard/` is a first-class part of this repository. Treat it as the product it is: fix bugs in place, never regenerate or redesign it.
+- `workspace/<target-role-slug>/` is the single source of truth; the dashboard reads it and writes back to it.
+- Every job carries a stable `job_id` — write operations must target it, never a row position.
+- The exact CSV contract between the pipeline and the dashboard lives in `docs/dashboard-integration.md`.
 
 ## Why browser-first
 

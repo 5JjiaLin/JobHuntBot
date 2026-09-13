@@ -96,9 +96,9 @@ metadata:
 
 本地工作区数据是唯一真源。
 
-如果当前仓库已经有 Web Dashboard 源码，读取 [dashboard-integration.md](docs/dashboard-integration.md)，**保留现有已确认 UI 与交互，不用本 Skill 包里的文档去覆盖现成看板**，只做数据契约和路径对接。
-
-> 本 Core 包故意不包含 Web Dashboard 源码。它用于和用户当前已经修改完成的 Dashboard 合并。
+启动仓库自带的本地看板：`node dashboard/server.js`。看板读取 `dashboard/config.json` 指向的工作区，
+若未初始化会提示先运行 `npm run init:workspace -- "<目标岗位>"`。
+看板 UI 与交互是产品的一部分：只修 bug，不重做。数据契约定义见 [dashboard-integration.md](docs/dashboard-integration.md)。
 
 完成本地工作台后，只问一个可选分支：**是否需要同步到飞书多维表格用于手机查看/共享？**
 
@@ -139,16 +139,16 @@ npm run init:workspace -- "<目标岗位>"
 - 公司名气不参与匹配分；
 - 第三方页面只做发现，官网未确认不得升级为“官方已验证”。
 
-## Dashboard integration contract
+## Dashboard contract
 
-若合并目标仓库已有 Dashboard：
-- 当前 Dashboard 源码和用户刚确认的 UI 是优先保留对象；
-- 不重新生成 Dashboard，不把旧 UI 规范覆盖回去；
-- 只解决工作区路径、CSV 字段、状态写回和启动方式的衔接；
-- 若旧数据仍在 `dashboard/job_pool.csv`，先备份并设计一次性迁移/兼容层，不能长期维护两个真源；
-- 完成后使用浏览器实际验收。
+The repository ships its own dashboard (`dashboard/`). When working on it:
 
-完整规则见 [dashboard-integration.md](docs/dashboard-integration.md)。
+- the existing UI and interactions are the product — fix bugs in place, do not redesign;
+- reads and writes go through `workspace/<target-role-slug>/` only; never create a second writable job pool;
+- every write identifies the job by its stable `job_id`, never by row position;
+- after any change, verify the flow in a real browser before declaring it done.
+
+The full data contract is in [dashboard-integration.md](docs/dashboard-integration.md).
 
 ## Completion
 

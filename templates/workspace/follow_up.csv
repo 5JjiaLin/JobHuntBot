@@ -1,1 +1,1 @@
-event_id,job_id,date,time,event_type,notes,status
+date,company,job_title,contact,channel,event_type,deadline,next_action,status,notes,time

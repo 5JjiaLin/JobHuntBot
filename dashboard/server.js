@@ -1,36 +1,61 @@
-// Zero-dependency static file server for the local job-search dashboard.
-// Serves this folder on http://localhost:8420 so dashboard.html can fetch()
-// the CSV files with fresh data on every reload. Also exposes write
+// Zero-dependency static file server for the local JobHuntBot dashboard.
+//
+// Serves this folder on http://127.0.0.1:8420 so dashboard.html can fetch()
+// the workspace CSV files with fresh data on every reload, and exposes write
 // endpoints so the dashboard can:
-//   - mark a job as Offer/Rejected (POST /api/update-status)
-//   - add/edit/delete an upcoming calendar event, which also stamps the
-//     job's current_stage in job_pool.csv (POST /api/calendar/*)
+//   - mark a job as Submitted / Pending / Offer / Rejected  (POST /api/update-status)
+//   - add / edit / delete interview & assessment events     (POST /api/calendar/*)
+//   - resolve a blocker                                     (POST /api/blocker/resolve)
+//
+// Every write targets the single source of truth:
+//   workspace/<target-role-slug>/jobs.csv
+// and identifies a job by its stable `job_id` (never by row position).
+//
+// Security posture (local-first, no auth by design):
+//   - binds to 127.0.0.1 only
+//   - validates the Host header against loopback variants
+//   - validates the Origin header on state-changing requests
+//   - contains every file read inside ROOT or WORKSPACE_DIR
+//   - rejects oversized request bodies with 413
 const http = require('http');
 const fs = require('fs');
 const path = require('path');
 
 const PORT = 8420;
 const ROOT = __dirname; // the dashboard/ folder
+const MAX_BODY_BYTES = 1e6;
+
+// Only loopback hosts / origins are accepted. The server can write files, so
+// anything reachable from another device is out of scope by design.
+const ALLOWED_HOSTS = new Set(['localhost:8420', '127.0.0.1:8420', '[::1]:8420']);
+const ALLOWED_ORIGINS = new Set([
+  'http://localhost:8420',
+  'http://127.0.0.1:8420',
+  'http://[::1]:8420',
+]);
 
 // Single source of truth: workspace/<target-role-slug>/jobs.csv.
-// dashboard/config.json may set `workspace_dir` (relative to this folder) and
-// `target_role`. If absent, fall back to this folder so the server still boots,
-// but the canonical data lives in the workspace, never in a second copy.
-let WORKSPACE_DIR = ROOT;
+//
+// dashboard/config.json is a *local*, gitignored file produced by
+// `npm run init:workspace`. A fresh clone only ships config.example.json, so
+// the server must boot without it: it stays "unconfigured", serves empty
+// tables and asks the user to initialise — it never crashes and never writes
+// into the dashboard folder itself.
+let WORKSPACE_DIR = null;
 try {
   const cfg = JSON.parse(fs.readFileSync(path.join(ROOT, 'config.json'), 'utf8'));
-  if (cfg && typeof cfg.workspace_dir === 'string' && cfg.workspace_dir) {
-    WORKSPACE_DIR = path.resolve(ROOT, cfg.workspace_dir);
+  if (cfg && typeof cfg.workspace_dir === 'string' && cfg.workspace_dir.trim()) {
+    WORKSPACE_DIR = path.resolve(ROOT, cfg.workspace_dir.trim());
   }
 } catch (e) {
-  // no config.json — fall back to reading job_pool.csv from this folder
+  // missing / unreadable config.json → stay unconfigured
 }
+const WORKSPACE_CONFIGURED = WORKSPACE_DIR !== null;
+const JOB_POOL_PATH = WORKSPACE_CONFIGURED ? path.join(WORKSPACE_DIR, 'jobs.csv') : null;
+const FOLLOW_UP_PATH = WORKSPACE_CONFIGURED ? path.join(WORKSPACE_DIR, 'follow_up.csv') : null;
 
-const JOB_POOL_PATH = path.join(WORKSPACE_DIR, 'jobs.csv');
-const FOLLOW_UP_PATH = path.join(WORKSPACE_DIR, 'follow_up.csv');
-
-// The dashboard UI fetches these filenames; serve them from the workspace so
-// the front-end code stays unchanged while the real data lives in workspace/.
+// The dashboard UI still requests these filenames; serve them from the
+// workspace so the front-end stays unchanged while the data lives in one place.
 const DATA_FILE_MAP = {
   'job_pool.csv': 'jobs.csv',
   'follow_up.csv': 'follow_up.csv',
@@ -38,31 +63,9 @@ const DATA_FILE_MAP = {
   'blocker_queue.csv': 'blockers.csv',
 };
 
-// Canonical headers for the workspace data files. On a fresh clone the
-// workspace may not exist yet; create the directory and header-only CSVs so
-// the dashboard boots and the UI can write without a prior init run. Existing
-// files (real data) are never overwritten.
-const WORKSPACE_HEADERS = {
-  'jobs.csv': ['job_id','date_found','company','job_title','role_family','level','convert_track','location','remote_policy','source','job_url','posted_date','priority','status','resume_variant','skip_reason','blocker','next_action','notes','cohort_match_status','current_stage','验证置信度','submission_tier','company_tier','job_type','deadline','match_score','hard_gate','verification_status','applied_date'],
-  'follow_up.csv': ['date','company','job_title','contact','channel','event_type','deadline','next_action','status','notes','time'],
-  'blockers.csv': ['blocker_id','job_id','type','reason','next_action','status','created_at','resolved_at'],
-  'application_log.csv': ['attempt_date','company','job_title','job_url','platform','status','submission_evidence','resume_used','answers_used','confirmation_url','confirmation_text','notes'],
-};
-
-function ensureWorkspace() {
-  try {
-    fs.mkdirSync(WORKSPACE_DIR, { recursive: true });
-    for (const [file, header] of Object.entries(WORKSPACE_HEADERS)) {
-      const p = path.join(WORKSPACE_DIR, file);
-      if (!fs.existsSync(p)) {
-        writeCSVRows(p, header, []);
-        console.log('Created empty workspace file: ' + p);
-      }
-    }
-  } catch (e) {
-    console.warn('Could not initialize workspace directory: ' + e.message);
-  }
-}
+// Canonical table headers — shared with scripts/init-workspace.js so a freshly
+// scaffolded workspace always matches what the dashboard reads and writes.
+const { WORKSPACE_HEADERS } = require('./workspace-schema');
 
 const MIME = {
   '.html': 'text/html; charset=utf-8',
@@ -70,10 +73,32 @@ const MIME = {
   '.css': 'text/css; charset=utf-8',
   '.csv': 'text/csv; charset=utf-8',
   '.json': 'application/json; charset=utf-8',
+  '.png': 'image/png',
+  '.svg': 'image/svg+xml',
 };
 
-// Same quoted-field CSV dialect job_pool.csv already uses (every field
-// quoted, "" for an embedded quote, CRLF line endings).
+// ---------------- security helpers ----------------
+
+// Strict containment check. A plain `startsWith` can be fooled by sibling
+// directories sharing a prefix (e.g. /app vs /app-secret), so compare with
+// path.relative instead.
+function isPathInside(base, target) {
+  const relative = path.relative(base, target);
+  return (
+    relative === '' ||
+    (!relative.startsWith('..' + path.sep) &&
+      relative !== '..' &&
+      !path.isAbsolute(relative))
+  );
+}
+
+function reject(res, status, message) {
+  res.writeHead(status, { 'Content-Type': 'text/plain; charset=utf-8' });
+  res.end(message);
+}
+
+// ---------------- CSV (same quoted dialect the workspace files use) ----------------
+
 function parseCSV(text) {
   const rows = [];
   let row = [], field = '', inQuotes = false;
@@ -106,31 +131,45 @@ function stringifyCSV(rows) {
 
 function readCSVRows(filePath) {
   let text = fs.readFileSync(filePath, 'utf8');
-  // Strip ALL leading UTF-8 BOMs. job_pool.csv can accumulate stacked BOM
-  // bytes from repeated external writes; one stray BOM turns the first
-  // header cell into "\ufeffdate" and breaks every indexOf-based lookup,
-  // so we loop until none remain (instead of removing a single one).
+  // Strip ALL leading UTF-8 BOMs. These CSVs can accumulate stacked BOM bytes
+  // from repeated external writes; one stray BOM turns the first header cell
+  // into "\ufeffdate" and breaks every indexOf-based lookup, so loop until
+  // none remain (instead of removing a single one).
   while (text.charCodeAt(0) === 0xFEFF) text = text.slice(1);
   const rows = parseCSV(text);
-  return { header: rows[0], dataRows: rows.slice(1) };
+  return { header: rows[0] || [], dataRows: rows.slice(1) };
 }
 
 function writeCSVRows(filePath, header, dataRows) {
   fs.writeFileSync(filePath, '\uFEFF' + stringifyCSV([header, ...dataRows]));
 }
 
+function httpError(status, message) {
+  const e = new Error(message);
+  e.httpStatus = status;
+  return e;
+}
+
 function readJSONBody(req) {
   return new Promise((resolve, reject) => {
     let body = '';
+    let aborted = false;
     req.on('data', chunk => {
+      if (aborted) return;
       body += chunk;
-      if (body.length > 1e6) req.destroy(); // guard against runaway payloads
+      if (Buffer.byteLength(body) > MAX_BODY_BYTES) {
+        // Stop accumulating and let the caller answer with a proper 413 —
+        // never just destroy the socket.
+        aborted = true;
+        reject(httpError(413, 'Payload Too Large'));
+      }
     });
     req.on('end', () => {
+      if (aborted) return;
       try { resolve(JSON.parse(body)); }
-      catch (e) { reject(new Error('Invalid JSON body')); }
+      catch (err) { reject(httpError(400, 'Invalid JSON body')); }
     });
-    req.on('error', reject);
+    req.on('error', () => { if (!aborted) reject(httpError(400, 'Request error')); });
   });
 }
 
@@ -139,300 +178,241 @@ function sendJSON(res, statusCode, obj) {
   res.end(JSON.stringify(obj));
 }
 
-const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
-const TIME_RE = /^\d{2}:\d{2}$/;
+// ---------------- job lookup ----------------
+
+// Resolve a job row by stable `job_id`. Falls back to company + job_title only
+// for legacy workspaces that predate job_id; row position is never used as an
+// identity, so re-sorting or inserting rows can never update the wrong job.
+function findJobRow(selector) {
+  if (!WORKSPACE_CONFIGURED) {
+    throw httpError(503, 'Workspace not initialised. Run: npm run init:workspace -- "<target role>"');
+  }
+  const { header, dataRows } = readCSVRows(JOB_POOL_PATH);
+  const idCol = header.indexOf('job_id');
+  const cCol = header.indexOf('company');
+  const tCol = header.indexOf('job_title');
+  if (cCol === -1 || tCol === -1) {
+    throw httpError(500, 'jobs.csv is missing an expected column (company/job_title)');
+  }
+
+  const jobId = String((selector && selector.job_id) || '').trim();
+  let idx = -1;
+  if (jobId && idCol !== -1) {
+    idx = dataRows.findIndex(r => String(r[idCol] || '').trim() === jobId);
+  }
+  if (idx === -1) {
+    const company = String((selector && selector.company) || '');
+    const jobTitle = String((selector && selector.job_title) || '');
+    if (company && jobTitle) {
+      idx = dataRows.findIndex(r => r[cCol] === company && r[tCol] === jobTitle);
+    }
+  }
+  if (idx === -1) {
+    throw httpError(404, 'Job not found — provide a valid job_id (or company + job_title)');
+  }
+  return { header, dataRows, idx, row: dataRows[idx], idCol, cCol, tCol };
+}
+
+function requireColumn(header, name) {
+  const col = header.indexOf(name);
+  if (col === -1) throw httpError(500, `jobs.csv is missing an expected column (${name})`);
+  return col;
+}
+
+// ---------------- write endpoints ----------------
 
 async function handleUpdateStatus(req, res) {
   let payload;
-  try {
-    payload = await readJSONBody(req);
-  } catch (e) {
-    return sendJSON(res, 400, { ok: false, error: e.message });
-  }
+  try { payload = await readJSONBody(req); }
+  catch (e) { return sendJSON(res, e.httpStatus || 400, { ok: false, error: e.message }); }
 
-  const { rowIndex, company, job_title, status } = payload || {};
+  const status = payload && payload.status;
   if (!['Submitted', 'Offer', 'Rejected', 'Pending'].includes(status)) {
     return sendJSON(res, 400, { ok: false, error: 'status must be one of Submitted/Offer/Rejected/Pending' });
   }
-  if (!Number.isInteger(rowIndex) || rowIndex < 0) {
-    return sendJSON(res, 400, { ok: false, error: 'rowIndex must be a non-negative integer' });
-  }
 
-  let header, dataRows;
-  try {
-    ({ header, dataRows } = readCSVRows(JOB_POOL_PATH));
-  } catch (e) {
-    return sendJSON(res, 500, { ok: false, error: 'Could not read job_pool.csv: ' + e.message });
-  }
+  let found;
+  try { found = findJobRow(payload); }
+  catch (e) { return sendJSON(res, e.httpStatus || 500, { ok: false, error: e.message }); }
 
-  const companyCol = header.indexOf('company');
-  const titleCol = header.indexOf('job_title');
-  const statusCol = header.indexOf('status');
+  const statusCol = requireColumn(found.header, 'status');
+  found.row[statusCol] = status;
 
-  if (statusCol === -1 || companyCol === -1 || titleCol === -1) {
-    return sendJSON(res, 500, { ok: false, error: 'job_pool.csv is missing an expected column' });
-  }
-  if (rowIndex >= dataRows.length) {
-    return sendJSON(res, 409, { ok: false, error: 'rowIndex out of range — the file may have changed, please refresh' });
-  }
+  try { writeCSVRows(JOB_POOL_PATH, found.header, found.dataRows); }
+  catch (e) { return sendJSON(res, 500, { ok: false, error: 'Could not write jobs.csv: ' + e.message }); }
 
-  const target = dataRows[rowIndex];
-  // job_pool.csv may have been rewritten (e.g. by the agent) between page
-  // load and this click, which would shift row positions — confirm the row
-  // at this index is still the same job before overwriting its status.
-  if (target[companyCol] !== company || target[titleCol] !== job_title) {
-    return sendJSON(res, 409, { ok: false, error: 'This row no longer matches — the dashboard data changed, please refresh and try again' });
-  }
-
-  target[statusCol] = status;
-
-  try {
-    writeCSVRows(JOB_POOL_PATH, header, dataRows);
-  } catch (e) {
-    return sendJSON(res, 500, { ok: false, error: 'Could not write job_pool.csv: ' + e.message });
-  }
-
-  sendJSON(res, 200, { ok: true });
+  sendJSON(res, 200, { ok: true, job_id: String(found.row[found.idCol] || '').trim(), status });
 }
 
-// Locate + verify a job_pool.csv row by index, checking it still matches the
-// company/job_title the client last saw (same staleness guard as above).
-// Returns { header, dataRows, companyCol, titleCol, stageCol, target } or
-// throws an Error with an httpStatus property for the caller to relay.
-function locateJobRow(jobRowIndex, company, job_title) {
-  if (!Number.isInteger(jobRowIndex) || jobRowIndex < 0) {
-    const e = new Error('jobRowIndex must be a non-negative integer'); e.httpStatus = 400; throw e;
+async function handleBlockerResolve(req, res) {
+  let payload;
+  try { payload = await readJSONBody(req); }
+  catch (e) { return sendJSON(res, e.httpStatus || 400, { ok: false, error: e.message }); }
+
+  let found;
+  try { found = findJobRow(payload); }
+  catch (e) { return sendJSON(res, e.httpStatus || 500, { ok: false, error: e.message }); }
+
+  const bCol = requireColumn(found.header, 'blocker');
+  const nCol = requireColumn(found.header, 'next_action');
+  // Only the two blocker columns are touched — status / priority / notes / tier
+  // are left intact so resolving a blocker never loses application state.
+  found.row[bCol] = '';
+  found.row[nCol] = '待投递(阻塞已解决)';
+
+  try { writeCSVRows(JOB_POOL_PATH, found.header, found.dataRows); }
+  catch (e) { return sendJSON(res, 500, { ok: false, error: 'Could not write jobs.csv: ' + e.message }); }
+
+  sendJSON(res, 200, { ok: true, job_id: String(found.row[found.idCol] || '').trim() });
+}
+
+// Calendar events belong to jobs the user has already applied to.
+function locateAppliedJob(selector) {
+  const found = findJobRow(selector);
+  const statusCol = found.header.indexOf('status');
+  if (statusCol === -1 || found.row[statusCol] !== 'Submitted') {
+    throw httpError(409, 'This job is not in the Submitted/Applied bucket — calendar events are only for already-applied jobs');
   }
-  let header, dataRows;
-  try {
-    ({ header, dataRows } = readCSVRows(JOB_POOL_PATH));
-  } catch (err) {
-    const e = new Error('Could not read job_pool.csv: ' + err.message); e.httpStatus = 500; throw e;
+  return found;
+}
+
+const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
+const TIME_RE = /^\d{2}:\d{2}$/;
+
+function validateEvent(date, time, event_type) {
+  if (!DATE_RE.test(date)) throw httpError(400, 'date must be YYYY-MM-DD');
+  if (!TIME_RE.test(time)) throw httpError(400, 'time must be HH:MM');
+  if (typeof event_type !== 'string' || !event_type.trim()) {
+    throw httpError(400, 'event_type is required');
   }
-  const companyCol = header.indexOf('company');
-  const titleCol = header.indexOf('job_title');
-  const statusCol = header.indexOf('status');
-  const stageCol = header.indexOf('current_stage');
-  if ([companyCol, titleCol, statusCol, stageCol].includes(-1)) {
-    const e = new Error('job_pool.csv is missing an expected column (company/job_title/status/current_stage)'); e.httpStatus = 500; throw e;
-  }
-  if (jobRowIndex >= dataRows.length) {
-    const e = new Error('jobRowIndex out of range — the file may have changed, please refresh'); e.httpStatus = 409; throw e;
-  }
-  const target = dataRows[jobRowIndex];
-  if (target[companyCol] !== company || target[titleCol] !== job_title) {
-    const e = new Error('This job row no longer matches — the dashboard data changed, please refresh and try again'); e.httpStatus = 409; throw e;
-  }
-  if (target[statusCol] !== 'Submitted') {
-    const e = new Error('This job is not in the Submitted/Applied bucket — calendar events are only for already-applied jobs'); e.httpStatus = 409; throw e;
-  }
-  return { header, dataRows, statusCol, stageCol, target };
 }
 
 async function handleCalendarAdd(req, res) {
   let payload;
-  try {
-    payload = await readJSONBody(req);
-  } catch (e) {
-    return sendJSON(res, 400, { ok: false, error: e.message });
-  }
+  try { payload = await readJSONBody(req); }
+  catch (e) { return sendJSON(res, e.httpStatus || 400, { ok: false, error: e.message }); }
 
-  const { jobRowIndex, company, job_title, date, time, event_type } = payload || {};
-  if (!DATE_RE.test(date)) return sendJSON(res, 400, { ok: false, error: 'date must be YYYY-MM-DD' });
-  if (!TIME_RE.test(time)) return sendJSON(res, 400, { ok: false, error: 'time must be HH:MM' });
-  if (typeof event_type !== 'string' || !event_type.trim()) {
-    return sendJSON(res, 400, { ok: false, error: 'event_type is required' });
-  }
-
-  let jobRow;
+  const { date, time, event_type } = payload || {};
+  let job;
   try {
-    jobRow = locateJobRow(jobRowIndex, company, job_title);
-  } catch (e) {
-    return sendJSON(res, e.httpStatus || 500, { ok: false, error: e.message });
-  }
+    validateEvent(date, time, event_type);
+    job = locateAppliedJob(payload);
+  } catch (e) { return sendJSON(res, e.httpStatus || 400, { ok: false, error: e.message }); }
 
   // current_stage is the event content verbatim — no auto-suffix. Every
   // company's process reads differently, so don't guess a shared phrasing
   // convention on top of what the user typed.
   const stage = event_type.trim();
-  jobRow.target[jobRow.stageCol] = stage;
+  const stageCol = job.header.indexOf('current_stage');
+  if (stageCol !== -1) job.row[stageCol] = stage;
 
   let fuHeader, fuDataRows;
-  try {
-    ({ header: fuHeader, dataRows: fuDataRows } = readCSVRows(FOLLOW_UP_PATH));
-  } catch (e) {
-    return sendJSON(res, 500, { ok: false, error: 'Could not read follow_up.csv: ' + e.message });
-  }
-  const cols = ['date', 'company', 'job_title', 'contact', 'channel', 'event_type', 'deadline', 'next_action', 'status', 'notes', 'time'];
+  try { ({ header: fuHeader, dataRows: fuDataRows } = readCSVRows(FOLLOW_UP_PATH)); }
+  catch (e) { return sendJSON(res, 500, { ok: false, error: 'Could not read follow_up.csv: ' + e.message }); }
+
+  const cols = ['date', 'company', 'job_title', 'event_type', 'status', 'time'];
   if (cols.some(c => fuHeader.indexOf(c) === -1)) {
     return sendJSON(res, 500, { ok: false, error: 'follow_up.csv is missing an expected column' });
   }
   const newRow = new Array(fuHeader.length).fill('');
   newRow[fuHeader.indexOf('date')] = date;
-  newRow[fuHeader.indexOf('company')] = company;
-  newRow[fuHeader.indexOf('job_title')] = job_title;
-  newRow[fuHeader.indexOf('event_type')] = event_type.trim();
+  newRow[fuHeader.indexOf('company')] = job.row[job.cCol];
+  newRow[fuHeader.indexOf('job_title')] = job.row[job.tCol];
+  newRow[fuHeader.indexOf('event_type')] = stage;
   newRow[fuHeader.indexOf('status')] = 'Scheduled';
   newRow[fuHeader.indexOf('time')] = time;
   fuDataRows.push(newRow);
-  const followUpRowIndex = fuDataRows.length - 1;
 
   try {
-    writeCSVRows(JOB_POOL_PATH, jobRow.header, jobRow.dataRows);
+    writeCSVRows(JOB_POOL_PATH, job.header, job.dataRows);
     writeCSVRows(FOLLOW_UP_PATH, fuHeader, fuDataRows);
   } catch (e) {
-    return sendJSON(res, 500, { ok: false, error: 'Could not write dashboard files: ' + e.message });
+    return sendJSON(res, 500, { ok: false, error: 'Could not write workspace files: ' + e.message });
   }
 
-  sendJSON(res, 200, { ok: true, followUpRowIndex, current_stage: stage });
+  sendJSON(res, 200, {
+    ok: true,
+    job_id: String(job.row[job.idCol] || '').trim(),
+    followUpRowIndex: fuDataRows.length - 1,
+    current_stage: stage,
+  });
 }
 
 async function handleCalendarUpdate(req, res) {
   let payload;
-  try {
-    payload = await readJSONBody(req);
-  } catch (e) {
-    return sendJSON(res, 400, { ok: false, error: e.message });
-  }
+  try { payload = await readJSONBody(req); }
+  catch (e) { return sendJSON(res, e.httpStatus || 400, { ok: false, error: e.message }); }
 
-  const { followUpRowIndex, jobRowIndex, company, job_title, date, time, event_type } = payload || {};
+  const { followUpRowIndex, date, time, event_type } = payload || {};
   if (!Number.isInteger(followUpRowIndex) || followUpRowIndex < 0) {
     return sendJSON(res, 400, { ok: false, error: 'followUpRowIndex must be a non-negative integer' });
   }
-  if (!DATE_RE.test(date)) return sendJSON(res, 400, { ok: false, error: 'date must be YYYY-MM-DD' });
-  if (!TIME_RE.test(time)) return sendJSON(res, 400, { ok: false, error: 'time must be HH:MM' });
-  if (typeof event_type !== 'string' || !event_type.trim()) {
-    return sendJSON(res, 400, { ok: false, error: 'event_type is required' });
-  }
+
+  let job;
+  try {
+    validateEvent(date, time, event_type);
+    job = locateAppliedJob(payload);
+  } catch (e) { return sendJSON(res, e.httpStatus || 400, { ok: false, error: e.message }); }
 
   let fuHeader, fuDataRows;
-  try {
-    ({ header: fuHeader, dataRows: fuDataRows } = readCSVRows(FOLLOW_UP_PATH));
-  } catch (e) {
-    return sendJSON(res, 500, { ok: false, error: 'Could not read follow_up.csv: ' + e.message });
-  }
-  const fuCompanyCol = fuHeader.indexOf('company');
-  const fuTitleCol = fuHeader.indexOf('job_title');
+  try { ({ header: fuHeader, dataRows: fuDataRows } = readCSVRows(FOLLOW_UP_PATH)); }
+  catch (e) { return sendJSON(res, 500, { ok: false, error: 'Could not read follow_up.csv: ' + e.message }); }
+
   if (followUpRowIndex >= fuDataRows.length) {
     return sendJSON(res, 409, { ok: false, error: 'This event no longer exists — the calendar may have changed, please refresh' });
   }
   const fuTarget = fuDataRows[followUpRowIndex];
-  if (fuTarget[fuCompanyCol] !== company || fuTarget[fuTitleCol] !== job_title) {
-    return sendJSON(res, 409, { ok: false, error: 'This event no longer matches — the calendar may have changed, please refresh' });
+  const fuCompanyCol = fuHeader.indexOf('company');
+  const fuTitleCol = fuHeader.indexOf('job_title');
+  if (fuTarget[fuCompanyCol] !== job.row[job.cCol] || fuTarget[fuTitleCol] !== job.row[job.tCol]) {
+    return sendJSON(res, 409, { ok: false, error: 'This event no longer matches this job — the calendar may have changed, please refresh' });
   }
 
-  let jobRow;
-  try {
-    jobRow = locateJobRow(jobRowIndex, company, job_title);
-  } catch (e) {
-    return sendJSON(res, e.httpStatus || 500, { ok: false, error: e.message });
-  }
-
+  const stage = event_type.trim();
   fuTarget[fuHeader.indexOf('date')] = date;
   fuTarget[fuHeader.indexOf('time')] = time;
-  fuTarget[fuHeader.indexOf('event_type')] = event_type.trim();
-
-  // Same rule as add: current_stage is the event content verbatim.
-  const stage = event_type.trim();
-  jobRow.target[jobRow.stageCol] = stage;
+  fuTarget[fuHeader.indexOf('event_type')] = stage;
+  const stageCol = job.header.indexOf('current_stage');
+  if (stageCol !== -1) job.row[stageCol] = stage;
 
   try {
     writeCSVRows(FOLLOW_UP_PATH, fuHeader, fuDataRows);
-    writeCSVRows(JOB_POOL_PATH, jobRow.header, jobRow.dataRows);
+    writeCSVRows(JOB_POOL_PATH, job.header, job.dataRows);
   } catch (e) {
-    return sendJSON(res, 500, { ok: false, error: 'Could not write dashboard files: ' + e.message });
+    return sendJSON(res, 500, { ok: false, error: 'Could not write workspace files: ' + e.message });
   }
 
-  sendJSON(res, 200, { ok: true, current_stage: stage });
+  sendJSON(res, 200, { ok: true, job_id: String(job.row[job.idCol] || '').trim(), current_stage: stage });
 }
 
 async function handleCalendarDelete(req, res) {
   let payload;
-  try {
-    payload = await readJSONBody(req);
-  } catch (e) {
-    return sendJSON(res, 400, { ok: false, error: e.message });
-  }
+  try { payload = await readJSONBody(req); }
+  catch (e) { return sendJSON(res, e.httpStatus || 400, { ok: false, error: e.message }); }
 
-  const { followUpRowIndex, company, job_title, event_type, date, time } = payload || {};
+  const { followUpRowIndex } = payload || {};
   if (!Number.isInteger(followUpRowIndex) || followUpRowIndex < 0) {
     return sendJSON(res, 400, { ok: false, error: 'followUpRowIndex must be a non-negative integer' });
   }
+  if (!WORKSPACE_CONFIGURED) {
+    return sendJSON(res, 503, { ok: false, error: 'Workspace not initialised.' });
+  }
 
   let fuHeader, fuDataRows;
-  try {
-    ({ header: fuHeader, dataRows: fuDataRows } = readCSVRows(FOLLOW_UP_PATH));
-  } catch (e) {
-    return sendJSON(res, 500, { ok: false, error: 'Could not read follow_up.csv: ' + e.message });
-  }
+  try { ({ header: fuHeader, dataRows: fuDataRows } = readCSVRows(FOLLOW_UP_PATH)); }
+  catch (e) { return sendJSON(res, 500, { ok: false, error: 'Could not read follow_up.csv: ' + e.message }); }
+
   if (followUpRowIndex >= fuDataRows.length) {
     return sendJSON(res, 409, { ok: false, error: 'This event no longer exists — the calendar may have changed, please refresh' });
   }
-  const fuTarget = fuDataRows[followUpRowIndex];
-  const matches = (col, val) => fuTarget[fuHeader.indexOf(col)] === val;
-  if (!matches('company', company) || !matches('job_title', job_title) || !matches('event_type', event_type) || !matches('date', date) || !matches('time', time)) {
-    return sendJSON(res, 409, { ok: false, error: 'This event no longer matches — the calendar may have changed, please refresh' });
-  }
-
   fuDataRows.splice(followUpRowIndex, 1);
 
-  try {
-    writeCSVRows(FOLLOW_UP_PATH, fuHeader, fuDataRows);
-  } catch (e) {
-    return sendJSON(res, 500, { ok: false, error: 'Could not write follow_up.csv: ' + e.message });
-  }
+  try { writeCSVRows(FOLLOW_UP_PATH, fuHeader, fuDataRows); }
+  catch (e) { return sendJSON(res, 500, { ok: false, error: 'Could not write follow_up.csv: ' + e.message }); }
 
-  // Deliberately does not revert job_pool.csv's current_stage — there's no
-  // reliable "previous stage" to roll back to. Edit the stage manually if
-  // deleting this event should also change what's shown on the job card.
-  sendJSON(res, 200, { ok: true });
-}
-
-// Resolve a blocker: clear the job_pool.csv `blocker` column and reset
-// next_action so the job leaves the "阻塞项" page. Only the two columns are
-// touched — status / priority / tier / notes are left intact.
-async function handleBlockerResolve(req, res) {
-  let payload;
-  try {
-    payload = await readJSONBody(req);
-  } catch (e) {
-    return sendJSON(res, 400, { ok: false, error: e.message });
-  }
-
-  const { rowIndex, company, job_title } = payload || {};
-  if (!Number.isInteger(rowIndex) || rowIndex < 0) {
-    return sendJSON(res, 400, { ok: false, error: 'rowIndex must be a non-negative integer' });
-  }
-
-  let header, dataRows;
-  try {
-    ({ header, dataRows } = readCSVRows(JOB_POOL_PATH));
-  } catch (e) {
-    return sendJSON(res, 500, { ok: false, error: 'Could not read job_pool.csv: ' + e.message });
-  }
-  const cCol = header.indexOf('company');
-  const tCol = header.indexOf('job_title');
-  const bCol = header.indexOf('blocker');
-  const nCol = header.indexOf('next_action');
-  if ([cCol, tCol, bCol, nCol].includes(-1)) {
-    return sendJSON(res, 500, { ok: false, error: 'job_pool.csv is missing an expected column' });
-  }
-  if (rowIndex >= dataRows.length) {
-    return sendJSON(res, 409, { ok: false, error: 'rowIndex out of range — the file may have changed, please refresh' });
-  }
-  const target = dataRows[rowIndex];
-  if (target[cCol] !== company || target[tCol] !== job_title) {
-    return sendJSON(res, 409, { ok: false, error: 'This row no longer matches — the dashboard data changed, please refresh and try again' });
-  }
-
-  target[bCol] = '';
-  target[nCol] = '待投递(阻塞已解决)';
-
-  try {
-    writeCSVRows(JOB_POOL_PATH, header, dataRows);
-  } catch (e) {
-    return sendJSON(res, 500, { ok: false, error: 'Could not write job_pool.csv: ' + e.message });
-  }
+  // Deliberately does not revert jobs.csv current_stage — there's no reliable
+  // "previous stage" to roll back to. Edit the stage manually if deleting this
+  // event should also change what's shown on the job card.
   sendJSON(res, 200, { ok: true });
 }
 
@@ -444,12 +424,67 @@ const ROUTES = {
   '/api/calendar/delete': handleCalendarDelete,
 };
 
+// ---------------- workspace bootstrap ----------------
+
+function ensureWorkspace() {
+  if (!WORKSPACE_CONFIGURED) return;
+  try {
+    fs.mkdirSync(WORKSPACE_DIR, { recursive: true });
+    for (const [file, header] of Object.entries(WORKSPACE_HEADERS)) {
+      const p = path.join(WORKSPACE_DIR, file);
+      if (!fs.existsSync(p)) {
+        writeCSVRows(p, header, []);
+        console.log('Created empty workspace file: ' + p);
+      }
+    }
+  } catch (e) {
+    console.warn('Could not initialize workspace directory: ' + e.message);
+  }
+}
+
+function serveFile(res, filePath, fallbackHeaders) {
+  fs.readFile(filePath, (err, content) => {
+    if (err) {
+      // Workspace tables may legitimately not exist yet (fresh init). Serve a
+      // header-only table so the UI renders an empty state instead of breaking.
+      if (fallbackHeaders) {
+        res.writeHead(200, { 'Content-Type': MIME['.csv'], 'Cache-Control': 'no-store' });
+        res.end('\uFEFF' + stringifyCSV([fallbackHeaders]));
+        return;
+      }
+      res.writeHead(404, { 'Content-Type': 'text/plain; charset=utf-8' });
+      res.end('Not found');
+      return;
+    }
+    res.writeHead(200, {
+      'Content-Type': MIME[path.extname(filePath)] || 'application/octet-stream',
+      'Cache-Control': 'no-store',
+    });
+    res.end(content);
+  });
+}
+
 const server = http.createServer((req, res) => {
+  // Host must be a loopback variant: this server can write to the workspace.
+  const host = String(req.headers.host || '').toLowerCase();
+  if (!ALLOWED_HOSTS.has(host)) {
+    return reject(res, 403, 'Forbidden: invalid Host');
+  }
+
   const urlPath = decodeURIComponent(req.url.split('?')[0]);
 
-  if (req.method === 'POST' && ROUTES[urlPath]) {
-    ROUTES[urlPath](req, res);
-    return;
+  if (req.method === 'POST') {
+    // Browsers always send Origin on cross-origin POST. Local CLI/test tools
+    // may omit it — allow that, but never accept a foreign Origin.
+    const origin = req.headers.origin;
+    if (origin && !ALLOWED_ORIGINS.has(String(origin).toLowerCase())) {
+      return reject(res, 403, 'Forbidden: invalid Origin');
+    }
+    if (ROUTES[urlPath]) {
+      ROUTES[urlPath](req, res);
+      return;
+    }
+    return reject(res, 404, 'Not found');
   }
 
   if (req.method !== 'GET') {
@@ -460,43 +495,40 @@ const server = http.createServer((req, res) => {
 
   const servedPath = urlPath === '/' ? '/dashboard.html' : urlPath;
   const baseName = path.basename(servedPath);
+  const mappedName = DATA_FILE_MAP[baseName];
 
-  // Data files are served from the workspace so the workspace stays the only
-  // writable source; everything else is served from the dashboard folder.
-  const filePath = DATA_FILE_MAP[baseName]
-    ? path.join(WORKSPACE_DIR, DATA_FILE_MAP[baseName])
-    : path.join(ROOT, servedPath);
-
-  // Prevent escaping the allowed roots (dashboard folder or workspace folder).
-  if (!filePath.startsWith(ROOT) && !filePath.startsWith(WORKSPACE_DIR)) {
-    res.writeHead(403);
-    res.end('Forbidden');
-    return;
-  }
-
-  fs.readFile(filePath, (err, content) => {
-    if (err) {
-      res.writeHead(404, { 'Content-Type': 'text/plain; charset=utf-8' });
-      res.end('Not found: ' + urlPath);
+  if (mappedName) {
+    // Data files come from the workspace and must stay inside it.
+    if (!WORKSPACE_CONFIGURED) {
+      res.writeHead(200, { 'Content-Type': MIME['.csv'], 'Cache-Control': 'no-store' });
+      res.end('\uFEFF' + stringifyCSV([WORKSPACE_HEADERS[mappedName]]));
       return;
     }
-    const ext = path.extname(filePath);
-    res.writeHead(200, {
-      'Content-Type': MIME[ext] || 'application/octet-stream',
-      'Cache-Control': 'no-store',
-    });
-    res.end(content);
-  });
+    const target = path.resolve(WORKSPACE_DIR, mappedName);
+    if (!isPathInside(WORKSPACE_DIR, target)) return reject(res, 403, 'Forbidden');
+    return serveFile(res, target, WORKSPACE_HEADERS[mappedName]);
+  }
+
+  const target = path.resolve(ROOT, '.' + servedPath);
+  if (!isPathInside(ROOT, target)) return reject(res, 403, 'Forbidden');
+  return serveFile(res, target, null);
 });
 
 // Make sure the workspace data files exist before serving, so a fresh clone
-// with no real data still boots cleanly. This never touches existing files.
+// with a configured workspace boots cleanly. Never touches existing files.
 ensureWorkspace();
 
-// Bind to localhost only — this server can now write to job_pool.csv, so it
-// shouldn't be reachable from other devices on the network.
+// Bind to loopback only — this server can write to the workspace, so it should
+// never be reachable from another device on the network.
 server.listen(PORT, '127.0.0.1', () => {
-  console.log('Dashboard running / 仪表盘已启动: http://localhost:' + PORT + '/dashboard.html');
+  console.log('JobHuntBot dashboard running: http://localhost:' + PORT + '/dashboard.html');
+  if (!WORKSPACE_CONFIGURED) {
+    console.log('');
+    console.log('No workspace configured yet (dashboard/config.json is missing or empty).');
+    console.log('Initialise one with:  npm run init:workspace -- "<target role>"');
+    console.log('Until then the dashboard renders empty tables.');
+  } else {
+    console.log('Workspace: ' + WORKSPACE_DIR);
+  }
   console.log('Keep this window open to keep serving; close it or press Ctrl+C to stop.');
-  console.log('保持这个窗口开着；关掉窗口或按 Ctrl+C 即可停止服务。');
 });

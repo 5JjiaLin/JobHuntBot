@@ -1,167 +1,148 @@
-# JobHuntBot Core
+# JobHuntBot
 
-把“找工作”从一次聊天，变成一个可持续推进的求职系统。
+**Turn your AI coding agent into a persistent job-search system — from JD research and resume tailoring to live job matching and application tracking.**
 
-**目标岗位 → 真实 JD 能力建模 → 经历事实库 → 定制简历 → 当前岗位匹配 → 本地投递工作区 → Web Dashboard → 可选飞书同步**
+把 Codex / Claude Code 从“帮我改一次简历”，变成一个持续运行的完整求职系统。
 
-> 本包是 **Core v3.2.0**，故意不包含 Web Dashboard 源码。用途是：把它交给 Codex，与用户当前已经修改完成的 `dashboard/` 源码合并，再一起上传 GitHub。
+[![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
+![Node](https://img.shields.io/badge/node-%3E%3D%2020-339933?logo=node.js&logoColor=white)
+![Local-first](https://img.shields.io/badge/local--first-no%20cloud-orange)
+![Storage](https://img.shields.io/badge/storage-CSV%20files-lightgrey)
+![Agents](https://img.shields.io/badge/for-Codex%20%7C%20Claude%20Code-8A2BE2)
 
-## 最简单的使用方式
+**中文说明 → [docs/README.zh-CN.md](docs/README.zh-CN.md)**
 
-把本 Core 包和现有 JobHuntBot 项目一起交给 Codex，并让它：
+![JobHuntBot dashboard](docs/assets/dashboard-overview.png)
 
-```text
-保留当前已经修改完成的 dashboard/ 源码，不要重做 UI。
-把 Core 包合并到仓库根目录，先读 AGENTS.md 和 SKILL.md，再按 docs/dashboard-integration.md 对齐 Dashboard 与 workspace 数据契约。
-检查完成后再上传 GitHub。
+> Screenshot shows the bundled **demo workspace** (`examples/demo-workspace/`) — fictional companies only.
+
+---
+
+## What it does
+
+```mermaid
+flowchart LR
+    A[Target Role] --> B[Real JD Research]
+    B --> C[Capability Modeling]
+    C --> D[Experience Mining]
+    D --> E[Resume Tailoring]
+    E --> F[Live Job Matching]
+    F --> G[Application Dashboard]
+    G --> H[Optional Feishu Sync]
 ```
 
-完整合并 Prompt 见 `docs/codex-usage.md`。
+Most AI job tools solve one step: rewrite a bullet point, draft a cover letter, or list openings. JobHuntBot is the surrounding system that keeps state between all of them — so the 50th application is informed by everything you learned in the first 49.
 
-## 它做什么
+## Why JobHuntBot
 
-1. 根据目标岗位建立行业大厂 / 中厂 / 小厂公司池。
-2. 使用真实完整 JD 提炼 Core 能力、Hard Gates、Common Skills、Plus。
-3. 没有经历文件时，提供苏格拉底式经历深挖 Prompt，生成《个人经历.md》。
-4. 用证据矩阵 + STAR / 反向 STAR 生成定制简历并审计真实性。
-5. 使用 **Control the in-app browser** 回到公司池找当前真实岗位。
-6. Hard Gate 先判断，再做 0–100 匹配评分和 S/A/B 排序。
-7. 把岗位写入本地 Workspace，并与现有 Web Dashboard 对接。
-8. 可选把本地岗位池单向同步到飞书多维表格。
+| Typical AI job tool | JobHuntBot |
+|---|---|
+| Optimises one resume against one pasted JD | Models the role across **many companies' real, complete JDs** |
+| Invents plausible-sounding experience | Builds an **evidence matrix** from your real experience first — no invented facts |
+| Ranks by keyword overlap | **Hard gates first** (location / graduation year / work authorization), then explainable 0–100 scoring |
+| Quotes stale search-engine results | Re-opens each posting in a **real browser** and verifies it is live right now |
+| Chat history is the only memory | Everything lands in a **local workspace** you keep forever |
+| Ends at "here are some links" | A dashboard where you actually **run the application pipeline** |
 
-## 为什么优先使用浏览器
+## Features
 
-很多招聘站是 SPA / JavaScript 动态列表，需要搜索、点击、登录态才能看到完整 JD。`Control the in-app browser` 可以像正常用户一样操作浏览器，提高当前岗位核验成功率。
+### Role Intelligence
+Researches real JDs across a company pool (large / mid / small tiers) and distils core capabilities, hard gates, and common vs. plus skills.
 
-边界：登录、验证码、权限限制不绕过，统一标记 `Needs user`。
+### Evidence-based Resume
+Experience facts → capability × evidence matrix → STAR / reverse-STAR → tailored resume → truthfulness audit.
 
-## 与现有 Web Dashboard 合并
+### Live Job Matching
+Goes back to the company pool and verifies openings in a real browser instead of quoting expired search results.
 
-本包没有 `dashboard/` 目录。
+### Local Application Workspace
+Jobs, applications, events and blockers live in plain CSV files under `workspace/` — readable, portable, and yours.
 
-Codex 必须把用户当前已经改好的 Dashboard 当作 UI 真源：
-- 不覆盖；
-- 不回滚；
-- 不重新生成；
-- 不用旧 UI 说明替换当前实现。
+### Application Dashboard
+Today's actions / job pool / pipeline / schedule / blockers, backed by a zero-dependency local server.
 
-真正要解决的是：
+### Optional Feishu Sync
+One-way Local → Feishu mirror via the official `lark-cli` OAuth. Your local workspace stays the single source of truth.
 
-```text
-Skill 找到岗位
-→ workspace/<role>/jobs.csv
-→ 当前 Dashboard 读取同一份数据
-→ 用户在 Dashboard 更新状态
-→ 状态写回同一工作区
-→ 可选同步飞书
-```
-
-详细规则：[`docs/dashboard-integration.md`](docs/dashboard-integration.md)。
-
-## 飞书同步
-
-本地数据始终是唯一真源。飞书只作为手机查看 / 分享协作镜像。
-
-飞书接入使用官方 [`larksuite/cli`](https://github.com/larksuite/cli)，不要求用户手工把 App ID / App Secret 填进项目。
-
-流程：
-
-```text
-检测 / 安装 lark-cli
-→ 检查已有登录态
-→ 必要时执行官方 config init
-→ 发起 Base 域 OAuth 授权
-→ 用户只在浏览器确认一次
-→ Codex 完成 device-code 登录
-→ 创建或连接飞书多维表格
-→ 按 job_id 单向 Upsert
-```
-
-详细规则：[`references/feishu-sync.md`](references/feishu-sync.md)。
-
-## 初始化工作区
+## Quick Start
 
 ```bash
-npm run init:workspace -- "AI 产品经理"
+git clone https://github.com/5JjiaLin/JobHuntBot.git
+cd JobHuntBot
 ```
 
-会创建：
+Then point your coding agent at the repo and say:
 
 ```text
-workspace/ai-产品经理/
-├── 01_role_market.md
-├── 02_evidence_matrix.md
-├── 03_resume.md
-├── 04_resume_audit.md
-├── jobs.csv
-├── 06_application_priority.md
-├── application_log.csv
-├── follow_up.csv
-├── blockers.csv
-└── config.json
+Read AGENTS.md and SKILL.md.
+Help me run JobHuntBot for "<target role>".
 ```
 
-脚本不会创建或覆盖 Dashboard 源码。
+The agent will research the role, check your experience, build the resume, find current openings, scaffold a workspace, and start the dashboard.
 
-## Core 包结构
-
-```text
-.
-├── AGENTS.md
-├── SKILL.md
-├── README.md
-├── manifest.json
-├── package.json
-├── .gitignore
-├── agents/
-│   └── interface.yaml
-├── assets/
-│   └── experience-miner-prompt.md
-├── references/
-│   ├── role-research.md
-│   ├── experience-input.md
-│   ├── resume-engine.md
-│   ├── job-matching.md
-│   ├── evidence-rules.md
-│   ├── application-workspace.md
-│   └── feishu-sync.md
-├── docs/
-│   ├── codex-usage.md
-│   └── dashboard-integration.md
-├── evals/
-└── scripts/
-    └── init-workspace.js
-```
-
-## 本地运行（合并后）
-
-本仓库合并后已经包含 `dashboard/`。本地启动看板：
+### Dashboard only (no agent needed)
 
 ```bash
-# 1) 初始化工作区（首次，会把空表写入 workspace/<目标岗位>/）
-npm run init:workspace -- "你的目标岗位"
-
-# 2) 启动零依赖静态服务
+npm run init:workspace -- "AI Product Manager"
 node dashboard/server.js
-# 打开 http://localhost:8420/dashboard.html
+# open http://localhost:8420/dashboard.html
 ```
 
-- 看板只读取 `workspace/<目标岗位>/jobs.csv` 作为唯一真源；
-- 首次启动若工作区不存在，`server.js` 会自动创建空表，不会写坏已有数据；
-- 服务仅绑定 `127.0.0.1`，不上网、不暴露 token，本地优先。
+No dependencies to install, no database, no account. The server binds to `127.0.0.1` only.
 
-推荐流程：先跑完整 Skill（研究岗位 → 简历 → 找岗），岗位写入工作区后，
-打开看板做持续投递与状态推进；飞书为可选镜像。
+To explore with sample data instead of an empty workspace, see [`examples/demo-workspace/`](examples/demo-workspace/).
 
-## 数据与隐私
+## How it works
 
-- 用户真实 `workspace/` 默认不提交 Git。
-- 飞书凭据由官方 `lark-cli` 管理，JobHuntBot 不保存 App Secret / OAuth token。
-- 不要把内部 JD、未公开公司资料或用户私有求职数据提交到公开仓库。
-- 合并 GitHub 前必须检查 Dashboard 目录是否包含真实投递数据、日志、备份和凭据。
+| Phase | What happens | Detail |
+|---|---|---|
+| 1 — Role Research | Build a company pool; read complete JDs across tiers; model capabilities and hard gates | [`references/role-research.md`](references/role-research.md) |
+| 2 — Experience Evidence | Mine and verify your real experience (socratic prompt included if you have none written down) | [`references/experience-input.md`](references/experience-input.md) |
+| 3 — Resume Tailoring | Evidence matrix → STAR → resume → fact/number/ownership audit | [`references/resume-engine.md`](references/resume-engine.md) |
+| 4 — Live Job Matching | Browser-verified current openings; hard gate → score → S/A/B | [`references/job-matching.md`](references/job-matching.md) |
+| 5 — Application Workspace | Write jobs into the workspace; track pipeline, events and blockers | [`references/application-workspace.md`](references/application-workspace.md) |
 
-## 适用范围
+`SKILL.md` is the agent's behaviour contract; the README stays a product overview on purpose.
 
-优先适用于产品、AI 产品、运营、市场/增长、商务/销售、电商、数据/商业分析、工程、咨询/策略、项目管理等多数结果型岗位。
+## Privacy
 
-科研、医疗、法律、纯艺术等强资质/作品集岗位可以使用通用流程，但需要额外专业规则。
+- `workspace/` is gitignored — your real job pool, notes and resumes never leave your machine.
+- The dashboard only talks to `127.0.0.1`; there is no telemetry and no cloud component.
+- Feishu credentials are owned by the official `lark-cli`; JobHuntBot never stores App Secrets or OAuth tokens.
+- The agent must not bypass logins, CAPTCHAs or paywalls — restricted pages are marked `Needs user`.
+- Resumes are generated from your verified experience; invented facts are treated as a defect, not a feature.
+
+## Supported agents
+
+**Best experience:** OpenAI Codex · Claude Code
+
+Any agent that can read repo files, run shell commands, edit files and control a browser can drive the workflow.
+
+## Project structure
+
+```text
+JobHuntBot/
+├── AGENTS.md            # how an agent should operate this repo
+├── SKILL.md             # the end-to-end job-search skill
+├── dashboard/           # zero-dependency local web dashboard
+├── references/          # per-phase playbooks the agent loads on demand
+├── scripts/             # workspace scaffolding, job-id tooling, security test
+├── templates/           # empty workspace tables
+├── docs/                # guides, data contract, 中文 README
+├── examples/            # demo workspace (fictional data)
+└── workspace/           # your data — local, gitignored
+```
+
+## Credits
+
+JobHuntBot is a fork-and-rebuild lineage, and this project would not exist without its predecessors:
+
+- **Yvonne He** — original **ApplyPilot** project.
+- **DanielPan12** — the **JobHuntBot** adaptation that carried the concept forward and shaped the current workflow.
+- **5JjiaLin** — merged the Core pipeline with a rebuilt dashboard, hardened the local server, moved all writes to stable `job_id`s, and prepared this open-source release.
+
+See [`LICENSE`](LICENSE) for the full copyright chain.
+
+## License
+
+[MIT](LICENSE) © Yvonne He, DanielPan12 and JobHuntBot contributors.

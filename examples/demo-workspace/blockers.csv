@@ -1,0 +1,4 @@
+﻿"blocker_id","job_id","type","reason","next_action","status","created_at","resolved_at"
+"demo-blk-1","jh-a5bbbdef840b","needs_login","待登录核验 (demo)","Demo: verify on the official careers site","open","2026-09-02",""
+"demo-blk-2","jh-68f67b88a1ca","link_invalid","待复核 (demo)","Demo: verify on the official careers site","open","2026-09-02",""
+"demo-blk-3","jh-6c66817a3328","missing_direct_link","缺直链 (demo)","Demo: verify on the official careers site","open","2026-09-02",""
