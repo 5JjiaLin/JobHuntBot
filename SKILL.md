@@ -1,6 +1,6 @@
 ---
 name: complete-job-search-pipeline
-version: "1.1.0"
+version: "1.1.1"
 description: >
   完整求职流水线：从目标岗位与行业定位开始，建立企业树和标杆 JD 能力模型，基于真实经历生成正式简历，
   再验证当前具体岗位并进入持续投递 Dashboard。适用于“帮我完整找工作”“研究岗位后做简历再找职位”
@@ -60,9 +60,18 @@ Benchmark：5 家不同头部/标杆企业，各 1 份当前代表性完整官�
 
 ### Phase 2 · Experience source
 
-读取 [experience-input.md](references/experience-input.md)。已有完整经历材料则直接核验并补证据缺口；事实不足时提供 GPT / Codex 两条经历挖掘路径。
+读取 [experience-input.md](references/experience-input.md)。
 
-Codex 路径第一问固定：`你之前有过工作经历吗？实习也算。`
+Phase 2 必须先执行**经历来源分流**，不能默认进入 Codex 挖掘：
+
+- 如果当前会话已上传、已明确提供路径、或当前 workspace 已有足够经历材料：直接读取核验并补证据缺口，不再询问 GPT / Codex。
+- 如果当前没有可用经历材料：**当前轮只给用户两个选择并停止**：
+  1. GPT：复制经历挖掘 Prompt，在 GPT 一问一答完成后带回《个人经历.md》；
+  2. Codex：就在当前会话一问一答完成经历挖掘。
+
+只有用户明确选择 `2` / Codex 后，下一轮第一问才固定为：`你之前有过工作经历吗？实习也算。`
+
+不得在用户尚未选择路径时直接问工作经历，也不得把“工作经历首问”和“如果有旧简历可以给我”混在同一轮。用户选择 `1` 后交付完整 Prompt 并暂停；用户随后上传现成材料则直接进入材料核验。
 
 输出：`03_个人经历.md`。
 
