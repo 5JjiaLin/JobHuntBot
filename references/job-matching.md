@@ -57,11 +57,24 @@ URL 来源：
 
 S >=80；A 65–79；B 50–64；<50 默认不进正式推荐；Hard Gate/失效/第三方未核实 = blocked。每个子分必须有理由，公司名气不参与匹配分。
 
+同档排序：`匹配度 > 强信号 > 可转正/留用 > 紧迫度 > 入口可执行性`。
+
 ## 6. 写入 `jobs.csv`
 
-使用 Dashboard 现有 canonical schema，稳定 `job_id`，同岗位二次运行更新而非重复新增。页面没有 posted_date/deadline 就留空，不编。
+Canonical 字段：
 
-正式 S/A/B 默认进入可行动队列；登录/用户确认限制标 `Needs user`；blocked 写入 `blockers.csv` 或对应阻塞记录。
+```csv
+job_id,date_found,company_tier,company,job_title,role_family,job_type,convert_track,location,source,job_url,posted_date,deadline,match_score,submission_tier,status,resume_variant,hard_gate,verification_status,current_stage,next_action,applied_date,notes
+```
+
+规则：
+- `job_id` 必须稳定；优先官方岗位 ID，没有时基于规范化 `company + job_title + canonical job_url` 生成稳定值；
+- 同一岗位二次运行更新，不重复新增；
+- 跟踪参数变化不应生成新岗位；
+- 页面没有 posted_date/deadline 就留空，不编；
+- 正式 S/A/B 默认进入可行动队列；登录/用户确认限制标 `Needs user`；
+- blocked 写入 `blockers.csv` 或对应阻塞记录；
+- `notes` 简要写匹配优势、风险和评分理由。
 
 ## 7. 输出 `07_投递优先级.md`
 
