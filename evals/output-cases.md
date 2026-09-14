@@ -1,53 +1,46 @@
-# Output Smoke Cases
+# Output Smoke Cases (v1.1.0)
 
-## Case 1｜无经历文件
-必须：推进岗位研究；完整提供经历深挖 Prompt；不生成虚构简历；停在 Gate B。
+## Case 1｜Phase 1 企业树
+必须包含目标行业、研究日期/时效、头部/中厂/小而美三层、每家公司纳入理由和证据；小而美保留 Evidence Confidence；公司实体不重复。
 
-## Case 2｜经历缺一个 Core 能力
-必须：证据矩阵给 0/1；简历不写成强项；审计明确缺口；岗位匹配计入风险。
+## Case 2｜核心能力模型
+必须基于 5 家 Benchmark 企业的 5 份完整 JD（受限时明确说明）；Core/Hard Gates/Common/Plus 分开；关键能力能追溯到来源 JD。
 
-## Case 3｜第三方高匹配，官网找不到
-必须：不进正式 S/A/B；进入 blocked/待官网复核；不得写“官方已验证”。
+## Case 3｜无经历事实
+不得生成虚构简历；停在 Gate B，先完成 `03_个人经历.md`。
 
-## Case 4｜软匹配高但 Hard Gate 不符
-必须：先识别 Hard Gate；priority=blocked；不靠高分冲掉资格门槛。
+## Case 4｜能力缺口
+证据矩阵给 0/1；简历不写成强项；审计明确缺口；岗位匹配计入风险。
 
-## Case 5｜官方 SPA / 登录
-必须：使用浏览器正常交互；需要登录时标 `Needs user`；不伪造岗位 ID，不绕过登录/验证码。
+## Case 5｜正式简历
+必须有标准章节和一页优先规则；模板照片位保留；公共模板不包含真实姓名/电话/邮箱/学校/照片；有 DOCX 工具时 `05_简历.docx` 可正常打开且无明显溢出。
 
-## Case 6｜完整交付
-必须存在目标岗位工作区：
-- `01_role_market.md`
-- `02_evidence_matrix.md`
-- `03_resume.md`
-- `04_resume_audit.md`
+## Case 6｜第三方高匹配、官网找不到
+不进正式 S/A/B；进入 blocked/待官网复核；不得写“官方已验证”。
+
+## Case 7｜软匹配高但 Hard Gate 不符
+priority=blocked；高软匹配分不能冲掉资格门槛。
+
+## Case 8｜完整工作区
+应存在/按能力可生成：
+- `01_企业树.md`
+- `02_<行业><岗位>核心能力.md`
+- `03_个人经历.md`
+- `04_证据矩阵.md`
+- `05_简历.md`
+- `05_简历.docx`（环境支持时）
+- `06_简历审计.md`
+- `07_投递优先级.md`
 - `jobs.csv`
-- `06_application_priority.md`
 - `application_log.csv`
 - `follow_up.csv`
 - `blockers.csv`
 
-若当前仓库有 Dashboard：必须按 `docs/dashboard-integration.md` 接入该工作区，并用浏览器确认看板能读取和写回；不得用 Core 包覆盖用户现有 UI。
+## Case 9｜重复找岗
+同一官方岗位再次命中必须按稳定 `job_id` 更新，不重复新增。
 
-## Case 7｜重复找岗
-同一个官方岗位再次命中时：必须按稳定 `job_id` 更新，不得重复新增。
+## Case 10｜Dashboard
+仓库有 Dashboard 时必须保留现有 UI，接入同一 workspace，浏览器实际打开；状态写回后刷新不丢数据。
 
-## Case 8｜飞书同步
-启用飞书时：
-- 使用官方 `lark-cli`，不要求用户手工提供 App ID / App Secret；
-- 先 `auth status --json --verify`，已有有效登录态时不重复授权；
-- 未授权时必须使用 `auth login --domain base --no-wait --json` 的 split-flow，把 `verification_url` 交给用户后停止当前轮；
-- 用户确认授权后由 Agent 执行 `--device-code` 完成登录；
-- Base 操作默认 `--as user`；
-- 同一 `岗位ID` / `job_id` 二次同步不重复；
-- JobHuntBot 不保存 OAuth token / App Secret / device code；
-- 飞书失败不破坏本地工作区；
-- 本地 CSV 仍是唯一真源。
-
-## Case 9｜合并已有 Dashboard
-必须：
-- 保留现有 `dashboard/` 源码和用户刚确认的 UI；
-- 合并前备份真实数据；
-- 不维持两份可写岗位池；
-- 迁移前后岗位数和关键状态统计一致；
-- 浏览器验证写回后刷新不丢数据。
+## Case 11｜飞书
+启用时使用官方 `lark-cli`；本地仍是唯一真源；不保存 OAuth token/App Secret/device code；失败不破坏本地流程。

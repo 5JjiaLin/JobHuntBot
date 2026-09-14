@@ -1,70 +1,69 @@
 # Using JobHuntBot with Codex / Claude Code
 
-JobHuntBot is designed to be driven by an AI coding agent. The repository is
-self-describing: `AGENTS.md` tells the agent how to behave, `SKILL.md` is the
-end-to-end workflow, and `references/` holds one playbook per phase.
+JobHuntBot is self-describing: `AGENTS.md` defines operating behavior, `SKILL.md` defines the end-to-end contract, and `references/` contains on-demand playbooks.
 
-## 1. Full workflow (recommended)
+## 1. Full workflow
 
 ```bash
 git clone https://github.com/5JjiaLin/JobHuntBot.git
 cd JobHuntBot
 ```
 
-Open the folder in your agent and prompt:
+Prompt:
 
 ```text
 Read AGENTS.md and SKILL.md.
-Help me run JobHuntBot for "<target role>".
+Run JobHuntBot from the beginning. Do not skip phases.
 ```
 
-Replace `<target role>` with a real one, e.g. `"AI Product Manager"` or
-`"前端开发工程师"`.
+Do not pre-fill a giant questionnaire. The first visible question should only ask for the target role. The agent then identifies relevant industries and asks for one industry choice. Recruitment track is asked only after the resume is ready and live job matching is about to start.
 
-The agent will:
+The agent should:
+1. identify the role's major industries and confirm one;
+2. build a head / growth / small-but-high-quality company tree;
+3. open five benchmark official JDs and build the capability model;
+4. verify or mine experience into `03_个人经历.md`;
+5. build the evidence matrix and standard resume, including DOCX when tooling supports it;
+6. ask campus/intern vs experienced vs both;
+7. return to the company tree and verify live openings;
+8. write jobs to the workspace;
+9. start and open the existing dashboard, then verify persistence.
 
-1. Build a company pool and model the role from real JDs.
-2. Check your experience material (or hand you a mining prompt if you have none).
-3. Produce a tailored resume plus a truthfulness audit.
-4. Find and verify current openings in a browser.
-5. Scaffold `workspace/<target-role-slug>/` and write the jobs there.
-6. Start the dashboard so you can run applications day to day.
+## 2. Silent bootstrap
 
-## 2. Dashboard only
+The agent may inspect repo files, Node and browser availability in the background. Unless blocked, it should not narrate clone status, SHAs, Node versions, loaded files, empty workspaces, or the entire plan.
 
-No agent required:
+It must not scan `~/Downloads`, `~/Desktop`, `~/Documents`, Home, or unrelated projects for personal resumes/experience without explicit user input/authorization.
+
+## 3. Browser capability
+
+When browser control is available, the agent should proactively use it for:
+- Phase 1: five benchmark official JDs;
+- Phase 4: current official job details;
+- Phase 5: localhost dashboard verification.
+
+Login/CAPTCHA/permission barriers become `Needs user`; do not bypass them.
+
+## 4. Dashboard only
 
 ```bash
 npm run init:workspace -- "AI Product Manager"
 node dashboard/server.js
-# open http://localhost:8420/dashboard.html
+# http://localhost:8420/dashboard.html
 ```
 
-## 3. Permissions the agent may ask for
+`init:workspace` is idempotent and intentionally does not create the dynamic `02_<行业><岗位>核心能力.md`; the agent creates it after industry confirmation.
 
-| Permission | Why |
-|---|---|
-| Read / write files in the repo | Workspace CSVs, resumes, notes |
-| Run shell commands | `npm run init:workspace`, `node dashboard/server.js` |
-| Control the browser | Open careers sites and read complete, rendered JDs |
+## 5. Permissions
 
-Grant repo-scoped access only. The dashboard server binds to `127.0.0.1` and
-never exposes your data to the network.
+Repo read/write, shell execution and browser control are enough for the full flow. Grant repo-scoped access only. The dashboard binds to `127.0.0.1`.
 
-## 4. Practical tips
-
-- One workspace per target role: `npm run init:workspace -- "<role>"` is safe to
-  re-run; it never overwrites existing data.
-- Let the agent finish a phase before jumping ahead — the workflow has explicit
-  gates (e.g. no resume without verified experience).
-- Ask the agent to re-verify any job before you apply; postings expire.
-- Keep `workspace/` out of any commit. It is gitignored by default.
-
-## 5. Common issues
+## 6. Common issues
 
 | Symptom | Fix |
 |---|---|
-| Dashboard shows empty tables | Run `npm run init:workspace -- "<role>"`, then restart the server |
-| "Workspace not initialised" on a write | Same as above — `dashboard/config.json` is missing or empty |
-| Server refuses to start: port in use | Another instance is running on 8420; stop it first |
-| Agent cannot open a posting (login wall) | That is by design — it marks the job `Needs user` instead of bypassing |
+| Dashboard empty | Ensure current workspace has `jobs.csv` and `dashboard/config.json` points to it |
+| Agent asks a long questionnaire at start | Re-read Silent Bootstrap / Entry rules in `AGENTS.md` |
+| Agent searches companies before industry choice | Re-run Phase 1 from `references/role-research.md` |
+| Job marked official from search result only | Gate D failed; open the official page or mark it unverified |
+| Dashboard URL printed but not opened | With browser capability, Phase 5 is incomplete until it is opened and verified |

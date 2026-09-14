@@ -1,8 +1,8 @@
 {
   "name": "jobhuntbot",
-  "version": "1.0.1",
+  "version": "1.1.0",
   "private": true,
-  "description": "AI-native job search system: JD research → evidence-based resumes → live job matching → local application dashboard.",
+  "description": "AI-native job search system: industry-aware company mapping → benchmark JDs → evidence-based resume → live job matching → local dashboard.",
   "type": "commonjs",
   "scripts": {
     "init:workspace": "node scripts/init-workspace.js",
