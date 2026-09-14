@@ -40,13 +40,34 @@ Skill + Workspace + Dashboard (+ optional Feishu mirror)
 读取 `references/role-research.md`，建立公司池和真实 JD 能力模型。
 
 ### Phase 2
-读取用户经历文件。没有时，完整给出 `assets/experience-miner-prompt.md`，让用户去 GPT 完成深挖并带回《个人经历.md》。不要凭聊天印象直接编简历。
+读取用户经历文件。经历事实不足时，**必须给用户两个选择，不要默认把用户赶去另一个 GPT 会话**：
+
+1. **在 GPT 里完成** — 读取 `assets/experience-miner-prompt.md`，把完整 Prompt 交给用户复制到 GPT，一问一答完成后把《个人经历.md》带回来，本阶段暂停；
+2. **直接在 Codex 里完成** — 你就在当前会话按同一套苏格拉底式流程一次问一个问题，最后直接生成《个人经历.md》。
+
+用户选 `2`（Codex）时，第一问必须是：“你之前有过工作经历吗？实习也算。”
+- 有工作 / 实习经历 → 工作与实习优先深挖，挖完再补校园 / 项目；
+- 没有 → 直接进入校园 / 项目经历，不继续逼问工作经历。
+
+用户已提供《个人经历.md》/ 完整经历库 / 详细旧简历 / 项目材料时，先读取；若已足够支撑目标岗位能力证据，不强制重跑完整挖掘，只针对岗位能力证据缺口补问。
+
+不要凭聊天印象直接编简历。详见 `references/experience-input.md`。
 
 ### Phase 3
 读取 `references/resume-engine.md` 与 `references/evidence-rules.md`，先做证据矩阵，再生成和审计简历。
 
 ### Phase 4
-读取 `references/job-matching.md`，回到公司池找当前职位。Hard Gate 先于匹配分。
+简历通过真实性 Gate 后，**不要直接开始搜岗**。先问招聘类型：
+
+> “接下来开始搜具体可投岗位。你这次主要看哪一类招聘？
+> 1. 校招 / 实习招聘
+> 2. 社招
+> 3. 两者都看
+> 回复 1 / 2 / 3 即可。”
+
+不在第一轮问这个——它影响具体岗位入口、资格 Hard Gate 与官方渠道，所以放在“简历完成 → 具体岗位搜索”之间。
+
+确认后读取 `references/job-matching.md`，回到 Phase 1 公司池，按所选招聘类型进入对应官方招聘入口找当前职位。校招 / 实习优先校园 / Campus / Internship 入口；社招优先社会招聘 / Experienced 入口；两者都看则两套渠道分别搜索，不得混淆 Hard Gate。Hard Gate 先于匹配分。
 
 ### Phase 5
 读取 `references/application-workspace.md`：

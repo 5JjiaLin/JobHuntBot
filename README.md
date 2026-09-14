@@ -80,6 +80,8 @@ Help me run JobHuntBot for "<target role>".
 
 The agent will research the role, check your experience, build the resume, find current openings, scaffold a workspace, and start the dashboard.
 
+Don't know what to provide? Just ask the agent to start from the beginning — it will ask only what is needed at each stage (target role first, recruitment type right before job search). You do **not** need to pre-fill your target role, recruitment type, experience, location, or graduation date up front.
+
 ### Dashboard only (no agent needed)
 
 ```bash
@@ -97,7 +99,7 @@ To explore with sample data instead of an empty workspace, see [`examples/demo-w
 | Phase | What happens | Detail |
 |---|---|---|
 | 1 — Role Research | Build a company pool; read complete JDs across tiers; model capabilities and hard gates | [`references/role-research.md`](references/role-research.md) |
-| 2 — Experience Evidence | Mine and verify your real experience (socratic prompt included if you have none written down) | [`references/experience-input.md`](references/experience-input.md) |
+| 2 — Experience Evidence | Mine and verify your real experience — the agent offers a copy-to-GPT prompt or does it live in-session (socratic, one question at a time) | [`references/experience-input.md`](references/experience-input.md) |
 | 3 — Resume Tailoring | Evidence matrix → STAR → resume → fact/number/ownership audit | [`references/resume-engine.md`](references/resume-engine.md) |
 | 4 — Live Job Matching | Browser-verified current openings; hard gate → score → S/A/B | [`references/job-matching.md`](references/job-matching.md) |
 | 5 — Application Workspace | Write jobs into the workspace; track pipeline, events and blockers | [`references/application-workspace.md`](references/application-workspace.md) |

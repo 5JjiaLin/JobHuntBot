@@ -1,6 +1,6 @@
 ---
 name: complete-job-search-pipeline
-version: "1.0.0"
+version: "1.0.1"
 description: >
   完整求职流水线：围绕目标岗位研究真实 JD、提炼岗位核心能力、从真实经历生成并审计定制简历、
   搜索当前可投岗位并建立持续投递工作区。覆盖多数实习、校招和社招岗位，也用于“帮我完整找工作”
@@ -59,8 +59,14 @@ metadata:
 
 读取 [experience-input.md](references/experience-input.md)。
 
-- 用户已有《个人经历.md》、旧简历、项目材料：读取并核验。
-- 用户没有足够经历事实：读取 [experience-miner-prompt.md](assets/experience-miner-prompt.md)，把 Prompt 完整交给用户，让其在 GPT 中完成经历深挖并带回 MD 文件。
+**先把经历来源分成两条路径，让用户自己选，不要默认把用户赶去另一个 GPT 会话。**
+
+- 用户已有《个人经历.md》、完整经历库、详细旧简历或项目材料：先读取核验；若已足够支撑目标岗位能力证据，不强制重跑完整挖掘，只针对**岗位能力证据缺口**补问必要问题。
+- 用户没有足够经历事实：给用户两个选择，由用户回复 `1` 或 `2`：
+  1. **在 GPT 里完成** — 读取 [experience-miner-prompt.md](assets/experience-miner-prompt.md)，把完整 Prompt 交给用户复制到 GPT，一问一答完成后把生成的《个人经历.md》带回，本阶段暂停在 Gate B；
+  2. **直接在 Codex 里完成** — Agent 在当前会话按同一套苏格拉底式流程一次问一个问题，逐步挖掘，最后直接生成《个人经历.md》。
+
+用户选 `2`（Codex）时，**第一问必须是**：“你之前有过工作经历吗？实习也算。”据此分支：有工作/实习经历 → 工作与实习优先深挖，再补校园/项目；没有 → 直接进入校园/项目经历。全过程严格执行一问一答、高信息增益、区分本人/团队/AI 贡献、不编造数字（详见 [experience-input.md](references/experience-input.md) 与 [evidence-rules.md](references/evidence-rules.md)）。
 
 **Gate B：**没有可核验经历事实，不生成简历。
 
@@ -76,9 +82,25 @@ metadata:
 
 读取 [job-matching.md](references/job-matching.md)。
 
-回到 Phase 1 公司池逐家查当前岗位：
+简历通过 Gate C（真实性审计）后，**不要直接开始搜岗**。先确认招聘类型：
 
-`官方站搜索 → 浏览器打开完整 JD → Hard Gate → 0–100 可解释评分 → S/A/B/blocked → 写入工作区`
+> “接下来开始搜具体可投岗位。你这次主要看哪一类招聘？
+> 1. 校招 / 实习招聘
+> 2. 社招
+> 3. 两者都看
+> 回复 1 / 2 / 3 即可。”
+
+不在 Phase 1 问这个问题——它主要影响具体岗位入口、资格 Hard Gate 与官方渠道，所以放在“简历完成 → 具体岗位搜索”之间。
+
+确认后，回到 Phase 1 公司池，按所选招聘类型进入对应官方招聘入口，逐家查当前岗位：
+
+`确认招聘类型 → 官方站搜索 → 浏览器打开完整 JD → Hard Gate → 0–100 可解释评分 → S/A/B/blocked → 写入工作区`
+
+- 校招 / 实习：优先校园招聘 / Campus / Graduate / New Grad / Internship 等官方入口，Hard Gate 重点看毕业年份、届别、在校身份、实习资格、地点、开始时间、实习时长、转正条件；
+- 社招：优先社会招聘 / Experienced Hire / Professional 等官方入口，Hard Gate 重点看工作年限、必须经验、行业经验、管理经验、地区、工作授权、硬学历/证书；
+- 两者都看：校招/实习渠道与社招渠道**分别搜索**，不得混成一个搜索过程，结果统一写入 `jobs.csv` 但保留 `job_type` / `convert_track` / `source` / `verification_status` / `hard_gate` 以区分招聘体系。
+
+公司同时有校招站与社招站时，必须按招聘类型进入正确入口；第三方页面（Boss / LinkedIn / Indeed / 牛客 / 实习僧 / 搜索缓存）只做发现，官网未确认不得升级为“官方已验证可投”。详见 [job-matching.md](references/job-matching.md) 的 Recruitment Track Selection。
 
 **Gate D：**未打开岗位详情或无法确认来源时，不得标“官方已验证可投”。
 

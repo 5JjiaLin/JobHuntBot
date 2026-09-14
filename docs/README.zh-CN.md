@@ -63,6 +63,8 @@ Help me run JobHuntBot for "<target role>".
 
 Agent 会研究岗位、核验经历、生成简历、找当前在招岗位、初始化工作区并启动看板。
 
+不知道该提供什么？直接让 Agent 从开头带你走一遍即可——它只会在每个阶段问当时需要的信息（先问目标岗位，搜岗前才问招聘类型）。你**不需要**提前填好目标岗位、招聘类型、经历、地区或毕业时间。
+
 ### 只用看板（不需要 Agent）
 
 ```bash
@@ -80,7 +82,7 @@ node dashboard/server.js
 | 阶段 | 内容 | 详细规则 |
 |---|---|---|
 | 1 — 岗位研究 | 建公司池；跨梯队读完整 JD；建模能力与 Hard Gate | [`../references/role-research.md`](../references/role-research.md) |
-| 2 — 经历证据 | 挖掘并核验真实经历（没有材料时提供深挖 Prompt） | [`../references/experience-input.md`](../references/experience-input.md) |
+| 2 — 经历证据 | 挖掘并核验真实经历（Agent 提供复制去 GPT 的 Prompt，或直接在会话里一问一答完成） | [`../references/experience-input.md`](../references/experience-input.md) |
 | 3 — 定制简历 | 证据矩阵 → STAR → 简历 → 事实/数字/权责审计 | [`../references/resume-engine.md`](../references/resume-engine.md) |
 | 4 — 实时找岗 | 浏览器核验当前在招；Hard Gate → 评分 → S/A/B | [`../references/job-matching.md`](../references/job-matching.md) |
 | 5 — 投递工作区 | 岗位写入工作区；跟踪流程、日程与阻塞项 | [`../references/application-workspace.md`](../references/application-workspace.md) |
