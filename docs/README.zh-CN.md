@@ -45,7 +45,7 @@ flowchart LR
 - **Live Job Matching** — 回到公司池用浏览器验证当前在招岗位，而不是引用过期摘要。
 - **Local Application Workspace** — 岗位、投递、日程、阻塞项全部存在本地 CSV，可读、可迁移、属于你。
 - **Application Dashboard** — 今日行动 / 岗位池 / 投递进度 / 日程 / 阻塞项，零依赖本地服务驱动。
-- **Optional Feishu Sync** — 通过官方 `lark-cli` OAuth 做 Local → Feishu 单向镜像，本地始终是唯一真源。
+- **可选飞书同步（由 AI Agent 调用官方 lark-cli）** — 将本地岗位池单向镜像到飞书多维表格；Dashboard 无内置飞书按钮，本地始终是唯一真源。
 
 ## 快速开始
 

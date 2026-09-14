@@ -29,9 +29,9 @@ const WORKSPACE_HEADERS = {
     'created_at', 'resolved_at',
   ],
   'application_log.csv': [
-    'attempt_date', 'company', 'job_title', 'job_url', 'platform', 'status',
-    'submission_evidence', 'resume_used', 'answers_used', 'confirmation_url',
-    'confirmation_text', 'notes',
+    'job_id', 'attempt_date', 'company', 'job_title', 'job_url', 'platform',
+    'status', 'submission_evidence', 'resume_used', 'answers_used',
+    'confirmation_url', 'confirmation_text', 'notes',
   ],
 };
 

@@ -100,9 +100,9 @@ metadata:
 若未初始化会提示先运行 `npm run init:workspace -- "<目标岗位>"`。
 看板 UI 与交互是产品的一部分：只修 bug，不重做。数据契约定义见 [dashboard-integration.md](docs/dashboard-integration.md)。
 
-完成本地工作台后，只问一个可选分支：**是否需要同步到飞书多维表格用于手机查看/共享？**
+完成本地工作台后，只问一个可选分支：**是否需要同步到飞书多维表格用于手机查看/共享？（可选，由 AI Agent 调用官方 lark-cli 完成，Dashboard 无内置飞书按钮）**
 
-若需要，读取 [feishu-sync.md](references/feishu-sync.md)。飞书默认通过官方 `larksuite/cli` 连接：先复用已有登录态，未授权时由 Codex 发起 `base` 域 OAuth split-flow，让用户只在浏览器完成一次授权，再由 Agent 完成 device-code 登录。飞书仅做 Local → Feishu 单向 Upsert 镜像，不作为第二真源；JobHuntBot 不接收或保存 App Secret / OAuth token。
+若需要，读取 [feishu-sync.md](references/feishu-sync.md)。飞书默认通过官方 `larksuite/cli` 连接：先复用已有登录态，未授权时由 Agent 发起 `base` 域 OAuth split-flow，让用户只在浏览器完成一次授权，再由 Agent 完成 device-code 登录。飞书仅做 Local → Feishu 单向 Upsert 镜像，不作为第二真源；JobHuntBot 不接收或保存 App Secret / OAuth token。
 
 ## Workspace contract
 

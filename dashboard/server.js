@@ -42,14 +42,26 @@ const ALLOWED_ORIGINS = new Set([
 // tables and asks the user to initialise — it never crashes and never writes
 // into the dashboard folder itself.
 let WORKSPACE_DIR = null;
+let TARGET_ROLE = '';
 try {
   const cfg = JSON.parse(fs.readFileSync(path.join(ROOT, 'config.json'), 'utf8'));
   if (cfg && typeof cfg.workspace_dir === 'string' && cfg.workspace_dir.trim()) {
     WORKSPACE_DIR = path.resolve(ROOT, cfg.workspace_dir.trim());
   }
+  if (cfg && typeof cfg.target_role === 'string') TARGET_ROLE = cfg.target_role.trim();
 } catch (e) {
   // missing / unreadable config.json → stay unconfigured
 }
+
+// Test / CI hook: redirect the workspace without editing the gitignored
+// dashboard/config.json. Takes precedence over whatever config.json says.
+if (process.env.JOBHUNTBOT_WORKSPACE_DIR) {
+  WORKSPACE_DIR = path.resolve(process.env.JOBHUNTBOT_WORKSPACE_DIR);
+}
+if (process.env.JOBHUNTBOT_TARGET_ROLE) {
+  TARGET_ROLE = process.env.JOBHUNTBOT_TARGET_ROLE;
+}
+
 const WORKSPACE_CONFIGURED = WORKSPACE_DIR !== null;
 const JOB_POOL_PATH = WORKSPACE_CONFIGURED ? path.join(WORKSPACE_DIR, 'jobs.csv') : null;
 const FOLLOW_UP_PATH = WORKSPACE_CONFIGURED ? path.join(WORKSPACE_DIR, 'follow_up.csv') : null;
@@ -219,6 +231,94 @@ function requireColumn(header, name) {
   return col;
 }
 
+// ---------------- helpers: time, snapshots, application log ----------------
+
+function localTimestamp() {
+  const d = new Date();
+  const pad = n => String(n).padStart(2, '0');
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ` +
+         `${pad(d.getHours())}:${pad(d.getMinutes())}`;
+}
+
+function safeRead(filePath) {
+  try { return fs.readFileSync(filePath); } catch (e) { return null; }
+}
+
+// Best-effort byte-level rollback so a half-applied write never leaves the two
+// tables disagreeing with each other.
+function restore(filePath, bytes) {
+  if (!bytes) return;
+  try { fs.writeFileSync(filePath, bytes); } catch (e) { /* nothing else to try */ }
+}
+
+// A blocker is "live" until it is explicitly resolved/closed.
+function isActiveBlockerStatus(value) {
+  const v = String(value || '').trim().toLowerCase();
+  return v === '' || v === 'open' || v === 'active' || v === 'pending';
+}
+
+function jobSnapshot(header, row) {
+  const get = name => {
+    const i = header.indexOf(name);
+    return i === -1 ? '' : String(row[i] || '');
+  };
+  return {
+    job_id: get('job_id'),
+    company: get('company'),
+    job_title: get('job_title'),
+    job_url: get('job_url'),
+    source: get('source'),
+  };
+}
+
+// Append one row to application_log.csv. Evidence fields are deliberately left
+// blank: a confirmation email or screenshot can only come from the user, and
+// inventing one would corrupt the audit trail.
+//
+// The schema is normalised to the canonical header (job_id-first) on every
+// write, so a pre-existing log file that predates the job_id column is migrated
+// in place without dropping its historical rows.
+function appendApplicationLog(job, eventStatus) {
+  const logPath = path.join(WORKSPACE_DIR, 'application_log.csv');
+  const canonical = WORKSPACE_HEADERS['application_log.csv'];
+  let header, dataRows;
+  if (fs.existsSync(logPath)) {
+    ({ header, dataRows } = readCSVRows(logPath));
+  } else {
+    header = [];
+    dataRows = [];
+  }
+  if (!header.length) {
+    header = canonical.slice();
+  } else if (header[0] !== 'job_id' || canonical.some(c => header.indexOf(c) === -1)) {
+    // Old schema (no job_id or missing a canonical column) → remap in place.
+    const remapped = dataRows.map(row => {
+      const nr = new Array(canonical.length).fill('');
+      canonical.forEach((c, i) => {
+        const oi = header.indexOf(c);
+        if (oi !== -1) nr[i] = row[oi] !== undefined ? row[oi] : '';
+      });
+      return nr;
+    });
+    header = canonical.slice();
+    dataRows = remapped;
+  }
+  const row = new Array(header.length).fill('');
+  const set = (name, value) => {
+    const i = header.indexOf(name);
+    if (i !== -1) row[i] = value;
+  };
+  set('job_id', job.job_id || '');
+  set('attempt_date', localTimestamp());
+  set('company', job.company || '');
+  set('job_title', job.job_title || '');
+  set('job_url', job.job_url || '');
+  set('platform', job.source || '');
+  set('status', eventStatus);
+  dataRows.push(row);
+  writeCSVRows(logPath, header, dataRows);
+}
+
 // ---------------- write endpoints ----------------
 
 async function handleUpdateStatus(req, res) {
@@ -236,34 +336,169 @@ async function handleUpdateStatus(req, res) {
   catch (e) { return sendJSON(res, e.httpStatus || 500, { ok: false, error: e.message }); }
 
   const statusCol = requireColumn(found.header, 'status');
+  const previous = String(found.row[statusCol] || '').trim();
+  if (previous === status) {
+    // No real transition — avoid duplicate log rows and pointless rewrites.
+    return sendJSON(res, 200, {
+      ok: true,
+      job_id: String(found.row[found.idCol] || '').trim(),
+      status,
+      unchanged: true,
+    });
+  }
   found.row[statusCol] = status;
+
+  // Transactional by intent: keep the exact original bytes so a failed log
+  // write can roll jobs.csv back. The status and the log must never diverge
+  // silently.
+  let originalBytes = null;
+  try { originalBytes = fs.readFileSync(JOB_POOL_PATH); } catch (e) { originalBytes = null; }
 
   try { writeCSVRows(JOB_POOL_PATH, found.header, found.dataRows); }
   catch (e) { return sendJSON(res, 500, { ok: false, error: 'Could not write jobs.csv: ' + e.message }); }
 
-  sendJSON(res, 200, { ok: true, job_id: String(found.row[found.idCol] || '').trim(), status });
+  const snapshot = jobSnapshot(found.header, found.row);
+  const logEvent =
+    status === 'Submitted' && previous !== 'Submitted' ? 'Submitted' :
+    status === 'Pending' && previous === 'Submitted' ? 'Reverted' : null;
+
+  if (logEvent) {
+    try {
+      appendApplicationLog(snapshot, logEvent);
+    } catch (e) {
+      if (originalBytes) {
+        try { fs.writeFileSync(JOB_POOL_PATH, originalBytes); } catch (rollbackError) { /* give up cleanly */ }
+      }
+      return sendJSON(res, 500, {
+        ok: false,
+        error: '状态未保存：application_log.csv 写入失败，jobs.csv 已回滚 — ' + e.message,
+      });
+    }
+  }
+
+  sendJSON(res, 200, {
+    ok: true,
+    job_id: snapshot.job_id,
+    status,
+    logged: logEvent,
+  });
 }
 
+// Build the compat summary that stays in jobs.csv.blocker. blockers.csv is the
+// lifecycle truth; this string is only so legacy readers still see *something*
+// on the job row. Empty string means "no active blocker".
+function blockerSummary(activeRows, header) {
+  if (!activeRows.length) return '';
+  const reasonCol = header.indexOf('reason');
+  const first = activeRows
+    .map(r => (reasonCol !== -1 ? String(r[reasonCol] || '') : ''))
+    .find(s => s.trim()) || '阻塞待解决';
+  return activeRows.length > 1
+    ? `${activeRows.length}个阻塞待解决：${first.slice(0, 40)}`
+    : first.slice(0, 60);
+}
+
+// Resolve a blocker. `blockers.csv` is the single source of truth:
+//   - with `blocker_id`  → resolve that one blocker
+//   - with only `job_id` → resolve every *active* blocker for that job
+// The job row's `blocker` column is only a compat summary: it is cleared when no
+// active blocker remains for the job, otherwise it reflects the remaining ones.
+// Either write that fails rolls back the other so the two files never disagree.
 async function handleBlockerResolve(req, res) {
   let payload;
   try { payload = await readJSONBody(req); }
   catch (e) { return sendJSON(res, e.httpStatus || 400, { ok: false, error: e.message }); }
 
-  let found;
-  try { found = findJobRow(payload); }
-  catch (e) { return sendJSON(res, e.httpStatus || 500, { ok: false, error: e.message }); }
+  if (!WORKSPACE_CONFIGURED) {
+    return sendJSON(res, 503, { ok: false, error: 'Workspace not initialised.' });
+  }
 
-  const bCol = requireColumn(found.header, 'blocker');
-  const nCol = requireColumn(found.header, 'next_action');
-  // Only the two blocker columns are touched — status / priority / notes / tier
-  // are left intact so resolving a blocker never loses application state.
-  found.row[bCol] = '';
-  found.row[nCol] = '待投递(阻塞已解决)';
+  const jobId = String((payload && payload.job_id) || '').trim();
+  const blockerId = String((payload && payload.blocker_id) || '').trim();
+  if (!jobId && !blockerId) {
+    return sendJSON(res, 400, { ok: false, error: 'job_id or blocker_id is required' });
+  }
 
-  try { writeCSVRows(JOB_POOL_PATH, found.header, found.dataRows); }
-  catch (e) { return sendJSON(res, 500, { ok: false, error: 'Could not write jobs.csv: ' + e.message }); }
+  // The job row is only needed for the compat summary. If the job is missing
+  // (orphaned blocker) we still resolve the blocker — just skip the jobs.csv
+  // touch rather than failing the whole request.
+  let found = null;
+  if (jobId) {
+    try { found = findJobRow({ job_id: jobId }); }
+    catch (e) { found = null; }
+  }
 
-  sendJSON(res, 200, { ok: true, job_id: String(found.row[found.idCol] || '').trim() });
+  const blockersPath = path.join(WORKSPACE_DIR, 'blockers.csv');
+  let bHeader, bData;
+  try { ({ header: bHeader, dataRows: bData } = readCSVRows(blockersPath)); }
+  catch (e) { return sendJSON(res, 500, { ok: false, error: 'Could not read blockers.csv: ' + e.message }); }
+  if (!bHeader.length) bHeader = WORKSPACE_HEADERS['blockers.csv'].slice();
+
+  const bIdCol = bHeader.indexOf('blocker_id');
+  const bJobCol = bHeader.indexOf('job_id');
+  const bStatusCol = bHeader.indexOf('status');
+  const bResolvedCol = bHeader.indexOf('resolved_at');
+  if ([bIdCol, bJobCol, bStatusCol].some(c => c === -1)) {
+    return sendJSON(res, 500, { ok: false, error: 'blockers.csv is missing a required column' });
+  }
+
+  let targets;
+  if (blockerId) {
+    const ti = bData.findIndex(r => String(r[bIdCol] || '').trim() === blockerId);
+    if (ti === -1) return sendJSON(res, 404, { ok: false, error: 'blocker not found' });
+    targets = [ti];
+  } else {
+    targets = bData
+      .map((r, i) => i)
+      .filter(i => String(bData[i][bJobCol] || '').trim() === jobId && isActiveBlockerStatus(bData[i][bStatusCol]));
+  }
+  if (!targets.length) {
+    return sendJSON(res, 200, { ok: true, resolved: 0, remaining_active: 0, job_id: jobId, blocker_id: blockerId });
+  }
+
+  const now = localTimestamp();
+  targets.forEach(i => {
+    bData[i][bStatusCol] = 'Resolved';
+    if (bResolvedCol !== -1) bData[i][bResolvedCol] = now;
+  });
+  const remaining = bData.filter(
+    r => String(r[bJobCol] || '').trim() === jobId && isActiveBlockerStatus(r[bStatusCol])
+  );
+
+  // Rollback-safe: keep blockers.csv original bytes before touching jobs.csv.
+  let bOriginal = null;
+  try { bOriginal = fs.readFileSync(blockersPath); } catch (e) { bOriginal = null; }
+  try { writeCSVRows(blockersPath, bHeader, bData); }
+  catch (e) { return sendJSON(res, 500, { ok: false, error: 'Could not write blockers.csv: ' + e.message }); }
+
+  if (!found) {
+    return sendJSON(res, 200, {
+      ok: true, resolved: targets.length, remaining_active: remaining.length,
+      job_id: jobId, blocker_id: blockerId,
+    });
+  }
+
+  const bCol = found.header.indexOf('blocker');
+  if (bCol !== -1) {
+    const summary = blockerSummary(remaining, bHeader);
+    if (found.row[bCol] !== summary) {
+      found.row[bCol] = summary;
+      const jOriginal = fs.readFileSync(JOB_POOL_PATH);
+      try { writeCSVRows(JOB_POOL_PATH, found.header, found.dataRows); }
+      catch (e) {
+        if (bOriginal) { try { fs.writeFileSync(blockersPath, bOriginal); } catch (_) { /* give up */ } }
+        return sendJSON(res, 500, {
+          ok: false,
+          error: 'jobs.csv 写入失败，blockers.csv 已回滚 — ' + e.message,
+        });
+      }
+    }
+  }
+
+  sendJSON(res, 200, {
+    ok: true, resolved: targets.length, remaining_active: remaining.length,
+    job_id: jobId, blocker_id: blockerId,
+  });
 }
 
 // Calendar events belong to jobs the user has already applied to.
@@ -491,6 +726,12 @@ const server = http.createServer((req, res) => {
     res.writeHead(405);
     res.end('Method not allowed');
     return;
+  }
+
+  // Lightweight config endpoint so the UI can show the configured target role
+  // without reaching into dashboard/config.json (which is gitignored).
+  if (urlPath === '/api/config') {
+    return sendJSON(res, 200, { target_role: TARGET_ROLE, workspace_configured: WORKSPACE_CONFIGURED });
   }
 
   const servedPath = urlPath === '/' ? '/dashboard.html' : urlPath;

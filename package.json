@@ -6,7 +6,9 @@
   "type": "commonjs",
   "scripts": {
     "init:workspace": "node scripts/init-workspace.js",
-    "test:security": "node scripts/security-smoke-test.js"
+    "migrate:blockers": "node scripts/migrate-blockers.js",
+    "test:security": "node scripts/security-smoke-test.js",
+    "test:regression": "node scripts/regression-test.js"
   },
   "engines": {
     "node": ">=20"

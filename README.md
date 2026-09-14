@@ -12,7 +12,7 @@
 
 **中文说明 → [docs/README.zh-CN.md](docs/README.zh-CN.md)**
 
-![JobHuntBot dashboard](docs/assets/dashboard-overview.png)
+![JobHuntBot dashboard](docs/assets/dashboard-hero.png)
 
 > Screenshot shows the bundled **demo workspace** (`examples/demo-workspace/`) — fictional companies only.
 
@@ -61,8 +61,8 @@ Jobs, applications, events and blockers live in plain CSV files under `workspace
 ### Application Dashboard
 Today's actions / job pool / pipeline / schedule / blockers, backed by a zero-dependency local server.
 
-### Optional Feishu Sync
-One-way Local → Feishu mirror via the official `lark-cli` OAuth. Your local workspace stays the single source of truth.
+### Optional Feishu Sync (agent-assisted)
+Optional, agent-assisted Local → Feishu mirror via the official `lark-cli`. The dashboard has **no built-in Feishu button** — sync, when wanted, is driven by an AI agent calling `lark-cli` against the local workspace. Your local workspace stays the single source of truth.
 
 ## Quick Start
 

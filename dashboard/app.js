@@ -40,7 +40,7 @@
   }
 
   // ---------------- data ----------------
-  const data = { jobs: [], followUps: [], lastRead: null };
+  const data = { jobs: [], followUps: [], blockers: [], targetRole: '', lastRead: null };
   async function readCSV(name) {
     const res = await fetch('./' + name + '?t=' + Date.now(), { cache: 'no-store' });
     if (!res.ok) throw new Error(name + ' 读取失败 (HTTP ' + res.status + ')');
@@ -51,9 +51,28 @@
     jobs.forEach((r, i) => { r.__rowIndex = i; });
     const fu = await readCSV('follow_up.csv').catch(() => []);
     fu.forEach((r, i) => { r.__rowIndex = i; });
+    // blockers.csv is the blocker lifecycle truth; the UI reads active blockers
+    // from here and joins jobs.csv for display fields.
+    const blockers = await readCSV('blocker_queue.csv').catch(() => []);
+    blockers.forEach((r, i) => { r.__rowIndex = i; });
     data.jobs = jobs;
     data.followUps = fu;
+    data.blockers = blockers;
     data.lastRead = new Date();
+  }
+
+  // ---------------- blocker truth (blocks.csv is single source) ----------------
+  function isActiveBlockerStatus(v) {
+    const s = String(v || '').trim().toLowerCase();
+    return s === '' || s === 'open' || s === 'active' || s === 'pending';
+  }
+  function activeBlockers() {
+    return (data.blockers || []).filter(b => isActiveBlockerStatus(b.status));
+  }
+  function blockedJobIdSet() {
+    const s = new Set();
+    activeBlockers().forEach(b => { const id = (b.job_id || '').trim(); if (id) s.add(id); });
+    return s;
   }
 
   // ---------------- helpers ----------------
@@ -67,21 +86,21 @@
 
   function isBlocked(r) {
     if (isExcluded(r)) return false;
-    if ((r.blocker || '').trim()) return true;
-    const na = r.next_action || '';
-    return ['需登录', '待登录核验', '飞书招聘需登录', '待复核', '无法投递', '镜像过期', '已下线', 'post id', '直链', '官方链接待复核', '镜像'].some(k => na.indexOf(k) !== -1);
+    return blockedJobIdSet().has((r.job_id || '').trim());
   }
-  function classifyBlocker(r) {
-    const na = r.next_action || '';
-    const b = r.blocker || '';
-    if (na.indexOf('需登录') !== -1 || na.indexOf('待登录核验') !== -1 || na.indexOf('飞书招聘需登录') !== -1)
-      return '需登录';
-    if (['待复核', '无法投递', '镜像过期', '已下线', 'post id', '直链', '官方链接待复核', '镜像'].some(k => (b + na).indexOf(k) !== -1))
-      return '链接待复核·失效';
+  function classifyBlocker(b) {
+    const t = (b.type || '').trim();
+    if (t === 'needs_login' || t === '需登录') return '需登录';
+    if (t === 'link_invalid' || t === 'missing_direct_link') return '链接待复核·失效';
+    const hay = (b.reason || '') + (b.next_action || '');
+    if (/登录|镜像|直链|post id|post_id|下线|过期|失效|无法投递/.test(hay)) return '链接待复核·失效';
     return '其他';
   }
   function blockerReason(r) {
-    return (r.blocker || '').trim() || (r.next_action || '').trim() || '待处理';
+    const id = (r.job_id || '').trim();
+    const b = activeBlockers().find(x => (x.job_id || '').trim() === id);
+    if (b) return (b.reason || '').trim() || (b.next_action || '').trim() || '待处理';
+    return (r.next_action || '').trim() || '待处理';
   }
 
   // pipeline stage: pending | submitted | assess | interview | ended
@@ -206,11 +225,14 @@
     toast(status === 'Offer' ? '已标记为 Offer 🎉' : '已标记为已挂', 'ok');
     await refreshData(); renderAll();
   }
-  async function doResolve(r) {
+  async function doResolve(arg) {
     toast('处理中…');
-    const res = await apiPost('/api/blocker/resolve', { job_id: r.job_id, company: r.company, job_title: r.job_title });
+    const payload = {};
+    if (arg.blocker_id) payload.blocker_id = arg.blocker_id;
+    if (arg.job_id) payload.job_id = arg.job_id;
+    const res = await apiPost('/api/blocker/resolve', payload);
     if (!res.ok) { toast('失败：' + res.error, 'err'); return; }
-    toast('阻塞已解决', 'ok');
+    toast(res.resolved ? '阻塞已解决' : '没有需要解决的阻塞', 'ok');
     await refreshData(); renderAll();
   }
 
@@ -552,27 +574,47 @@
   }
 
   // ---------------- blockers ----------------
+  // Reads the blocker lifecycle from blockers.csv (the single source) and joins
+  // jobs.csv by job_id for company / job_title / job_url / priority / tier.
   function renderBlockers() {
     const el = document.getElementById('view-blockers');
-    const list = data.jobs.filter(isBlocked);
+    const jobById = new Map();
+    data.jobs.forEach(r => { const id = (r.job_id || '').trim(); if (id) jobById.set(id, r); });
+
+    const list = activeBlockers().map(b => {
+      const job = jobById.get((b.job_id || '').trim()) || {};
+      return {
+        blocker: b,
+        company: job.company || '',
+        job_title: job.job_title || '',
+        job_url: job.job_url || '',
+        priority: job.priority || '',
+        submission_tier: job.submission_tier || '',
+        job_id: (b.job_id || '').trim(),
+      };
+    });
+
     const groups = { '需登录': [], '链接待复核·失效': [], '其他': [] };
-    list.forEach(r => { groups[classifyBlocker(r)].push(r); });
+    list.forEach(item => { groups[classifyBlocker(item.blocker)].push(item); });
+
     let html = '<div class="view-head"><h2>阻塞项</h2><span class="meta">' + list.length + ' 个待处理</span></div>';
     if (!list.length) { html += '<div class="empty">当前没有阻塞项 🎉</div>'; }
     else {
       ['需登录', '链接待复核·失效', '其他'].forEach(g => {
         if (!groups[g].length) return;
         html += '<div class="blk-group-title">' + g + ' · ' + groups[g].length + '</div>';
-        groups[g].forEach(r => {
+        groups[g].forEach(item => {
+          const b = item.blocker;
+          const tierChip = item.submission_tier ? '<span class="chip tier-' + esc(item.submission_tier) + '">' + esc(item.submission_tier) + '梯队</span>' : '';
           html += `
-            <div class="blk-card" data-job-id="${esc(r.job_id || '')}">
+            <div class="blk-card" data-blocker-id="${esc(b.blocker_id || '')}" data-job-id="${esc(item.job_id)}">
               <div style="min-width:0">
-                <div class="jr-company">${esc(r.company)} · ${esc(r.job_title)}</div>
-                <div class="blk-reason">${esc(blockerReason(r).slice(0, 60))}</div>
-                <div class="blk-next">建议：${esc((r.next_action || '待处理').slice(0, 50))}</div>
+                <div class="jr-company">${esc(item.company)} · ${esc(item.job_title)} ${tierChip}</div>
+                <div class="blk-reason">${esc((b.reason || '').slice(0, 60))}</div>
+                <div class="blk-next">建议：${esc((b.next_action || '待处理').slice(0, 50))}</div>
               </div>
               <div class="blk-actions">
-                ${r.job_url ? '<button class="btn btn-sm" data-act="site">打开官网</button>' : ''}
+                ${item.job_url ? '<button class="btn btn-sm" data-act="site">打开官网</button>' : ''}
                 <button class="btn btn-sm" data-act="detail">查看岗位</button>
                 <button class="btn btn-sm btn-primary" data-act="resolve">标记已解决</button>
               </div>
@@ -581,13 +623,15 @@
       });
     }
     el.innerHTML = html;
-    el.querySelectorAll('.blk-card').forEach((card, i) => {
-      const r =
-        list.find(x => x.job_id && x.job_id === card.getAttribute('data-job-id')) ||
-        list.find(x => x.company + ' · ' + x.job_title === card.querySelector('.jr-company').textContent);
-      card.querySelector('[data-act="detail"]').addEventListener('click', () => openDrawer(r));
-      const sb = card.querySelector('[data-act="site"]'); if (sb) sb.addEventListener('click', () => { if (r.job_url) window.open(r.job_url, '_blank'); });
-      card.querySelector('[data-act="resolve"]').addEventListener('click', () => doResolve(r));
+    el.querySelectorAll('.blk-card').forEach(card => {
+      const bId = card.getAttribute('data-blocker-id');
+      const jId = card.getAttribute('data-job-id');
+      const item = list.find(x => (x.blocker.blocker_id || '') === bId);
+      const job = item ? jobById.get(jId) : null;
+      card.querySelector('[data-act="detail"]').addEventListener('click', () => openDrawer(job || { job_id: jId }));
+      const sb = card.querySelector('[data-act="site"]');
+      if (sb) sb.addEventListener('click', () => { if (item && item.job_url) window.open(item.job_url, '_blank'); });
+      card.querySelector('[data-act="resolve"]').addEventListener('click', () => doResolve(item ? item.blocker : { job_id: jId }));
     });
   }
 
@@ -665,9 +709,9 @@
   }
   function renderAll() {
     document.getElementById('last-updated').textContent = '最后读取：' + (data.lastRead ? data.lastRead.toLocaleString('zh-CN', { hour12: false }) : '—');
-    const sub = (data.jobs.find(r => (r.role_family || '').indexOf('AI') !== -1) && 'AI 产品经理') || '';
-    // 不硬编码方向；若岗位普遍含 AI 方向则显示，否则保持"求职工作台"
-    document.getElementById('brand-sub').textContent = sub || '求职工作台';
+    // Top-bar subtitle: configured target_role wins; never inferred from
+    // role_family. Falls back to the neutral default.
+    document.getElementById('brand-sub').textContent = data.targetRole || '求职工作台';
     renderCurrent();
   }
 
@@ -684,6 +728,10 @@
     const cs = document.getElementById('connect-screen');
     try {
       await refreshData();
+      try {
+        const cfg = await fetch('./api/config').then(r => r.json().catch(() => ({})));
+        data.targetRole = (cfg && cfg.target_role) || '';
+      } catch (e) { data.targetRole = ''; }
       cs.classList.add('hidden');
       renderAll();
     } catch (e) {
