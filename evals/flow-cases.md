@@ -1,6 +1,6 @@
-# Agent Flow Behavior Cases (v1.1.0)
+# Agent Flow Behavior Cases (v1.1.1)
 
-用于检查 Agent 是否遵守 JobHuntBot v1.1.0 冻结流程。
+用于检查 Agent 是否遵守 JobHuntBot v1.1.1 冻结流程。
 
 ## Entry & Phase 1
 
@@ -42,55 +42,78 @@ Phase 1 完成必须生成 `01_企业树.md` 与 `02_<行业><岗位>核心能�
 
 ## Phase 2 · Experience
 
-### Case K｜没有经历文件
-必须给用户两个选择：GPT Prompt / 当前 Codex 一问一答，不默认赶去另一个会话。
+### Case K｜当前没有经历材料
+当前会话没有上传/明确路径，workspace 也没有真实经历内容。
+必须：**当前轮只给两个选择**：
+1. GPT Prompt；
+2. 当前 Codex 一问一答。
+不得直接问“你之前有过工作经历吗？实习也算。”，不得擅自默认 Codex。
 
-### Case L｜用户选 Codex
-第一问固定：`你之前有过工作经历吗？实习也算。`
+### Case L｜路径选择轮必须停止
+Agent 已向用户展示 GPT / Codex 两个选择。
+必须：这一轮到此结束，不继续附带工作经历、项目经历、旧简历等额外问题。
 
-### Case M｜无工作/实习
-直接进入校园/项目经历，不继续逼问工作经历。
+### Case M｜用户选 Codex
+用户明确回复 `2` / “就在 Codex 里”。
+必须：**下一轮**第一问固定为：`你之前有过工作经历吗？实习也算。`
 
-### Case N｜已有完整经历材料
-先读取核验，只针对目标岗位能力证据缺口补问，不强制重跑。
+### Case N｜用户选 GPT
+用户明确回复 `1` / “用 GPT”。
+必须：读取 `assets/experience-miner-prompt.md`，完整交付最新 Prompt 后暂停 Phase 2；不得继续在当前会话自行深挖。
 
-### Case O｜Phase 2 文件
+### Case O｜无工作/实习
+用户在 Codex 路径回答没有工作/实习。
+必须：直接进入校园/项目经历，不继续逼问工作经历。
+
+### Case P｜已有完整经历材料
+用户在进入 Phase 2 前已经上传简历/项目材料，或提供明确路径。
+必须：先读取核验，只针对目标岗位能力证据缺口补问，不强制重跑，也不再要求选择 GPT / Codex。
+
+### Case Q｜选择轮改为上传材料
+Agent 已给出 1/2，用户没有选，而是直接上传旧简历或项目材料。
+必须：转入“已有资料”分支读取核验，不逼用户补选 1/2。
+
+### Case R｜禁止混合首问
+错误示例：`你之前有过工作经历吗？实习也算。如果手上有旧简历也可以给我。`
+必须判为失败：这等价于未获用户选择就默认进入 Codex 路径。
+
+### Case S｜Phase 2 文件
 完成后必须写 `03_个人经历.md`。
 
 ## Phase 3 · Resume
 
-### Case P｜证据矩阵先于简历
+### Case T｜证据矩阵先于简历
 必须先生成 `04_证据矩阵.md`，0/1 证据不能包装成强项。
 
-### Case Q｜默认正式格式
+### Case U｜默认正式格式
 有 DOCX 能力时必须按 `references/resume-format.md` 和 `assets/resume-template.docx` 生成 `05_简历.docx`；照片位保留，不泄露模板作者私人信息。
 
-### Case R｜一页溢出
+### Case V｜一页溢出
 优先删弱/重复内容与压缩表达，不应先无限缩字体。
 
 ## Phase 4 · Recruitment track
 
-### Case S｜简历完成准备找岗
+### Case W｜简历完成准备找岗
 Gate C 后才确认 1 校招/实习 / 2 社招 / 3 两者都看。
 
-### Case T｜Phase 4 读取企业树
+### Case X｜Phase 4 读取企业树
 必须从 `01_企业树.md` 搜索头部/中厂/小而美，不静默换成随机公司列表。
 
-### Case U｜校招/实习
+### Case Y｜校招/实习
 优先官方 Campus/Graduate/Internship，Hard Gate 看届别、在校、开始时间、时长等，不混社招主池。
 
-### Case V｜社招
+### Case Z｜社招
 优先 Experienced/Professional，Hard Gate 看年限、必须经验、行业/管理经验、工作授权等，不混校招主池。
 
-### Case W｜两者都看
+### Case AA｜两者都看
 两套渠道分别搜索，结果可统一写 `jobs.csv` 但保留招聘体系字段。
 
 ## Phase 5 · Dashboard
 
-### Case X｜自动打开看板
+### Case AB｜自动打开看板
 浏览器能力可用时：启动 Dashboard 后必须主动打开 localhost 并验证；不得只输出 URL。
 
-### Case Y｜Dashboard 写回
+### Case AC｜Dashboard 写回
 必须确认稳定 `job_id` 写回并刷新后持久化；不能只看页面出现了岗位就算完成。
 
 ## Small & High-Quality Company Discovery
