@@ -1,6 +1,6 @@
 # JobHuntBot
 
-**Turn your AI coding agent into a persistent job-search system — from JD research and resume tailoring to live job matching and application tracking.**
+**Turn your AI coding agent into a persistent job-search system — from industry-aware company research and benchmark JDs to a production-ready resume, live job matching, and application tracking.**
 
 把 Codex / Claude Code 从“帮我改一次简历”，变成一个持续运行的完整求职系统。
 
@@ -8,61 +8,67 @@
 ![Node](https://img.shields.io/badge/node-%3E%3D%2020-339933?logo=node.js&logoColor=white)
 ![Local-first](https://img.shields.io/badge/local--first-no%20cloud-orange)
 ![Storage](https://img.shields.io/badge/storage-CSV%20files-lightgrey)
-![Agents](https://img.shields.io/badge/for-Codex%20%7C%20Claude%20Code-8A2BE2)
+![Version](https://img.shields.io/badge/version-1.1.0-8A2BE2)
 
 **中文说明 → [docs/README.zh-CN.md](docs/README.zh-CN.md)**
 
 ![JobHuntBot dashboard](docs/assets/dashboard-hero.png)
 
-> Screenshot shows the bundled **demo workspace** (`examples/demo-workspace/`) — fictional companies only.
-
----
+> Screenshot shows the bundled demo workspace (`examples/demo-workspace/`) — fictional companies only.
 
 ## What it does
 
 ```mermaid
 flowchart LR
-    A[Target Role] --> B[Real JD Research]
-    B --> C[Capability Modeling]
-    C --> D[Experience Mining]
-    D --> E[Resume Tailoring]
-    E --> F[Live Job Matching]
-    F --> G[Application Dashboard]
-    G --> H[Optional Feishu Sync]
+    A[Target Role] --> B[Target Industry]
+    B --> C[Company Tree]
+    C --> D[5 Benchmark JDs]
+    D --> E[Capability Model]
+    E --> F[Experience Evidence]
+    F --> G[Production Resume]
+    G --> H[Live Job Matching]
+    H --> I[Application Dashboard]
+    I --> J[Optional Feishu Sync]
 ```
 
-Most AI job tools solve one step: rewrite a bullet point, draft a cover letter, or list openings. JobHuntBot is the surrounding system that keeps state between all of them — so the 50th application is informed by everything you learned in the first 49.
+JobHuntBot keeps state between the steps most tools treat as isolated: what the market actually asks for, what you can honestly prove, which companies matter in the chosen industry, which current roles pass hard gates, and what happened after you applied.
 
 ## Why JobHuntBot
 
 | Typical AI job tool | JobHuntBot |
 |---|---|
-| Optimises one resume against one pasted JD | Models the role across **many companies' real, complete JDs** |
-| Invents plausible-sounding experience | Builds an **evidence matrix** from your real experience first — no invented facts |
-| Ranks by keyword overlap | **Hard gates first** (location / graduation year / work authorization), then explainable 0–100 scoring |
-| Quotes stale search-engine results | Re-opens each posting in a **real browser** and verifies it is live right now |
-| Chat history is the only memory | Everything lands in a **local workspace** you keep forever |
-| Ends at "here are some links" | A dashboard where you actually **run the application pipeline** |
+| Starts from one pasted JD | Starts from **role → industry → company tree → 5 benchmark official JDs** |
+| Treats “big / mid / small” as headcount | Tiers companies relative to the **target industry and role** |
+| Finds random startups | Has a dedicated **small-but-high-quality discovery + evidence gate** |
+| Invents plausible-sounding experience | Builds an **evidence matrix** from real experience first |
+| Produces only resume text | Produces structured resume content and, when tooling supports it, a **formatted DOCX template-based resume** |
+| Ranks by keyword overlap | **Hard gates first**, then explainable 0–100 scoring |
+| Quotes stale search results | Re-opens postings in a **real browser** for verification |
+| Ends at “here are some links” | Opens a local **application dashboard** backed by your workspace |
 
 ## Features
 
-### Role Intelligence
-Researches real JDs across a company pool (large / mid / small tiers) and distils core capabilities, hard gates, and common vs. plus skills.
+### Industry-aware Role Intelligence
+First identifies where the role exists, asks for the target industry, builds a three-layer company tree, then models the role from five benchmark JDs from head/benchmark companies.
 
-### Evidence-based Resume
-Experience facts → capability × evidence matrix → STAR / reverse-STAR → tailored resume → truthfulness audit.
+### Company Tree
+- Head / benchmark companies
+- Growth / mid-size companies
+- Small-but-high-quality / early high-quality companies
+
+`assets/company-seeds.md` accelerates discovery but never acts as a permanent classification truth source.
+
+### Small-but-high-quality Discovery
+Uses official qualification lists, industry/regional rankings, venture/industry sources, and industry-specific signals, then applies an evidence-aware quality gate. One funding round, award, ranking, or government badge is never enough by itself.
+
+### Evidence-based Production Resume
+Capability model → verified experience → evidence matrix → STAR / reverse-STAR → standard one-page resume structure → truthfulness audit. The public DOCX template contains placeholders only and leaves the photo position blank.
 
 ### Live Job Matching
-Goes back to the company pool and verifies openings in a real browser instead of quoting expired search results.
+Returns to the Phase 1 company tree and verifies current openings in the correct campus/intern or experienced-hire channel.
 
-### Local Application Workspace
-Jobs, applications, events and blockers live in plain CSV files under `workspace/` — readable, portable, and yours.
-
-### Application Dashboard
-Today's actions / job pool / pipeline / schedule / blockers, backed by a zero-dependency local server.
-
-### Optional Feishu Sync (agent-assisted)
-Optional, agent-assisted Local → Feishu mirror via the official `lark-cli`. The dashboard has **no built-in Feishu button** — sync, when wanted, is driven by an AI agent calling `lark-cli` against the local workspace. Your local workspace stays the single source of truth.
+### Local Application Workspace + Dashboard
+All artifacts and job state live under `workspace/`. Phase 5 starts the existing dashboard and, when browser control is available, opens and verifies it instead of merely printing a localhost URL.
 
 ## Quick Start
 
@@ -75,76 +81,67 @@ Then point your coding agent at the repo and say:
 
 ```text
 Read AGENTS.md and SKILL.md.
-Help me run JobHuntBot for "<target role>".
+Run JobHuntBot from the beginning. Do not skip phases.
 ```
 
-The agent will research the role, check your experience, build the resume, find current openings, scaffold a workspace, and start the dashboard.
+The first visible question should only ask for your target role. Recruitment track is asked later, immediately before live job search.
 
-Don't know what to provide? Just ask the agent to start from the beginning — it will ask only what is needed at each stage (target role first, recruitment type right before job search). You do **not** need to pre-fill your target role, recruitment type, experience, location, or graduation date up front.
-
-### Dashboard only (no agent needed)
+### Dashboard only
 
 ```bash
 npm run init:workspace -- "AI Product Manager"
 node dashboard/server.js
-# open http://localhost:8420/dashboard.html
+# http://localhost:8420/dashboard.html
 ```
 
-No dependencies to install, no database, no account. The server binds to `127.0.0.1` only.
+No database and no cloud service. The server binds to `127.0.0.1` only.
 
-To explore with sample data instead of an empty workspace, see [`examples/demo-workspace/`](examples/demo-workspace/).
+## Workflow & outputs
 
-## How it works
-
-| Phase | What happens | Detail |
+| Phase | What happens | Output |
 |---|---|---|
-| 1 — Role Research | Build a company pool; read complete JDs across tiers; model capabilities and hard gates | [`references/role-research.md`](references/role-research.md) |
-| 2 — Experience Evidence | Mine and verify your real experience — the agent offers a copy-to-GPT prompt or does it live in-session (socratic, one question at a time) | [`references/experience-input.md`](references/experience-input.md) |
-| 3 — Resume Tailoring | Evidence matrix → STAR → resume → fact/number/ownership audit | [`references/resume-engine.md`](references/resume-engine.md) |
-| 4 — Live Job Matching | Browser-verified current openings; hard gate → score → S/A/B | [`references/job-matching.md`](references/job-matching.md) |
-| 5 — Application Workspace | Write jobs into the workspace; track pipeline, events and blockers | [`references/application-workspace.md`](references/application-workspace.md) |
+| 1 | Role → industry → company tree → 5 benchmark JDs → capability model | `01_企业树.md`, `02_<行业><岗位>核心能力.md` |
+| 2 | Verify or mine real experience | `03_个人经历.md` |
+| 3 | Evidence matrix → resume → truthfulness audit | `04_证据矩阵.md`, `05_简历.md`, optional/available `05_简历.docx`, `06_简历审计.md` |
+| 4 | Recruitment track → company tree → browser-verified openings → hard gate → S/A/B | `jobs.csv`, `07_投递优先级.md` |
+| 5 | Validate workspace → start/open/verify dashboard | running local Dashboard |
 
-`SKILL.md` is the agent's behaviour contract; the README stays a product overview on purpose.
+Detailed playbooks live in `references/`; `SKILL.md` stays the execution contract rather than becoming a knowledge dump.
 
 ## Privacy
 
-- `workspace/` is gitignored — your real job pool, notes and resumes never leave your machine.
-- The dashboard only talks to `127.0.0.1`; there is no telemetry and no cloud component.
-- Feishu credentials are owned by the official `lark-cli`; JobHuntBot never stores App Secrets or OAuth tokens.
-- The agent must not bypass logins, CAPTCHAs or paywalls — restricted pages are marked `Needs user`.
-- Resumes are generated from your verified experience; invented facts are treated as a defect, not a feature.
-
-## Supported agents
-
-**Best experience:** OpenAI Codex · Claude Code
-
-Any agent that can read repo files, run shell commands, edit files and control a browser can drive the workflow.
+- `workspace/` is gitignored.
+- Silent bootstrap must not scan `~/Downloads`, `~/Desktop`, `~/Documents`, Home, or unrelated projects for personal job-search files.
+- External personal files are read only after the user supplies them or explicitly authorizes access in Phase 2.
+- The public resume template contains placeholders, not personal identity data.
+- The dashboard only talks to `127.0.0.1`; no telemetry or cloud component.
+- The agent must not bypass logins, CAPTCHAs, permissions, or paywalls.
 
 ## Project structure
 
 ```text
 JobHuntBot/
-├── AGENTS.md            # how an agent should operate this repo
-├── SKILL.md             # the end-to-end job-search skill
-├── dashboard/           # zero-dependency local web dashboard
-├── references/          # per-phase playbooks the agent loads on demand
-├── scripts/             # workspace scaffolding, job-id tooling, security test
-├── templates/           # empty workspace tables
-├── docs/                # guides, data contract, 中文 README
-├── examples/            # demo workspace (fictional data)
-└── workspace/           # your data — local, gitignored
+├── AGENTS.md
+├── SKILL.md
+├── assets/             # experience prompt, company seeds, resume template
+├── dashboard/          # existing zero-dependency local dashboard
+├── references/         # per-phase playbooks, loaded on demand
+├── scripts/            # workspace scaffolding and tests
+├── templates/          # CSV/table templates
+├── docs/
+├── evals/
+├── examples/
+└── workspace/          # your data, local + gitignored
 ```
 
 ## Credits
 
-JobHuntBot is a fork-and-rebuild lineage, and this project would not exist without its predecessors:
+- **Yvonne He** — original ApplyPilot project.
+- **DanielPan12** — JobHuntBot adaptation that carried the concept forward.
+- **5JjiaLin** — rebuilt and integrated the current local-first workflow and dashboard.
 
-- **Yvonne He** — original **ApplyPilot** project.
-- **DanielPan12** — the **JobHuntBot** adaptation that carried the concept forward and shaped the current workflow.
-- **5JjiaLin** — merged the Core pipeline with a rebuilt dashboard, hardened the local server, moved all writes to stable `job_id`s, and prepared this open-source release.
-
-See [`LICENSE`](LICENSE) for the full copyright chain.
+See [LICENSE](LICENSE) for the copyright chain.
 
 ## License
 
-[MIT](LICENSE) © Yvonne He, DanielPan12 and JobHuntBot contributors.
+[MIT](LICENSE)
