@@ -1,21 +1,27 @@
-# Application Workspace｜投递工作区与 Dashboard 对接
+# Application Workspace｜Workspace 与 Dashboard 收口
 
-本文件负责阶段 5。阶段 4 找到岗位之后，不要把结果只留在聊天或 Markdown 里。
-
-目标是让用户每天能持续推进：**今天先投什么、哪些已经投、哪些在测评/面试、哪些卡住、下一步是什么。**
+Workspace 从 Phase 1 开始承载阶段产物；Phase 5 负责最终校验、启动 Dashboard 并把它真正交到用户手上，而不是只打印 localhost URL。
 
 ## 1. 数据原则
 
-- `workspace/<target-role-slug>/` 是求职数据工作区。
-- 目标状态下，`jobs.csv` 是岗位唯一真源。
-- Web Dashboard 负责读取和轻量写回状态。
-- 飞书多维表格是可选协作镜像，不是第二真源。
-- 同一个岗位必须有稳定 `job_id`，禁止用 CSV 行号做长期主键。
+- `workspace/<target-role-slug>/` 是当前求职工作区；
+- `jobs.csv` 是岗位唯一真源；
+- Dashboard 读取并轻量写回状态；
+- 飞书只做可选镜像；
+- 稳定 `job_id` 是写操作主键，不使用 CSV 行号。
 
-每个目标岗位使用：
+完整结构：
 
 ```text
 workspace/<target-role-slug>/
+├── 01_企业树.md
+├── 02_<行业><岗位>核心能力.md
+├── 03_个人经历.md
+├── 04_证据矩阵.md
+├── 05_简历.md
+├── 05_简历.docx
+├── 06_简历审计.md
+├── 07_投递优先级.md
 ├── jobs.csv
 ├── application_log.csv
 ├── follow_up.csv
@@ -23,96 +29,49 @@ workspace/<target-role-slug>/
 └── config.json
 ```
 
-完整求职产物同目录还包含 `01_role_market.md`、证据矩阵、简历、审计和优先级清单。
+动态 `02_...核心能力.md` 在行业确认后由 Agent 创建；DOCX 在环境支持时生成。
 
-## 2. 与已有 Dashboard 的关系
+## 2. 初始化时点
 
-本 Core 包不包含 Dashboard 源码。
+目标岗位 + 行业确认后即可运行：
 
-如果目标仓库已经有 `dashboard/`：
-- 现有 Dashboard 的 UI/交互实现优先保留；
-- 先读取实际代码和实际 CSV，再决定最小改动；
-- 不允许因为 Core 的参考字段与现有字段不同就重写前端；
-- 不允许长期保留 `dashboard/job_pool.csv` 和 `workspace/.../jobs.csv` 两个都会被修改的真源。
-
-具体迁移 / 兼容策略见 `../docs/dashboard-integration.md`。
-
-## 3. Canonical `jobs.csv`
-
-新工作区推荐字段：
-
-```csv
-job_id,date_found,company_tier,company,job_title,role_family,job_type,convert_track,location,source,job_url,posted_date,deadline,match_score,submission_tier,status,resume_variant,hard_gate,verification_status,current_stage,next_action,applied_date,notes
+```bash
+npm run init:workspace -- "<目标岗位>"
 ```
 
-字段只在真实有值时写入。不要为了 Dashboard 或飞书填一个不存在的数据。
+脚本幂等，不覆盖真实已有数据。Phase 1–4 逐步把产物写进同一目录。
 
-关键字段：
-- `job_id`：稳定唯一键；已有岗位更新而不是重复新增。
-- `submission_tier`：S / A / B / blocked。
-- `status`：至少支持 Pending / Needs user / Submitted / Assessment / Interview / Offer / Rejected / Closed；若现有 Dashboard 的状态模型更简洁，可通过兼容映射展示，不必为了本 Skill 破坏已运行的数据。
-- `current_stage`：笔试/测评、一面、二面、终面、HR 面、谈薪等更细阶段。
-- `next_action`：下一步明确动作。
-- `verification_status`：已验证 / 需登录复核 / 第三方待官网复核 / 已失效等。
+## 3. Canonical jobs.csv
 
-## 4. 稳定 `job_id`
+使用 Dashboard 当前 schema。关键要求：稳定 `job_id`、可追踪 `submission_tier/status/current_stage/next_action/verification_status`，字段没有真实值时留空。
 
-优先使用官方稳定岗位 ID；若官方没有可复用 ID，可基于规范化：
+## 4. 日志
 
-`company + job_title + canonical job_url`
+`application_log.csv` 记录状态事件；`follow_up.csv` 记录测评/面试/跟进；`blockers.csv` 是阻塞历史与当前状态真源。不要为 Dashboard 再建第二份可写岗位池。
 
-生成稳定哈希。
+## 5. Phase 5 completion sequence
 
-要求：
-- 同一官方岗位再次命中时保持相同；
-- URL 只有跟踪参数变化时不应生成新 ID；
-- 不要使用 CSV 行号。
+1. 检查 `01_企业树.md` 至 `07_投递优先级.md` 的应有产物；
+2. 检查 Phase 4 正式岗位已进入 `jobs.csv`；
+3. 检查 logs/blockers 文件存在且 schema 可读；
+4. 确认 `dashboard/config.json` 指向当前 workspace；
+5. 启动：`node dashboard/server.js`；
+6. 浏览器打开 `http://localhost:8420/dashboard.html`；
+7. 验证当前 workspace/目标岗位被正确读取；
+8. 验证岗位列表存在；
+9. 用一个安全测试岗位/现有状态做写回验证，确认通过稳定 `job_id` 更新并且刷新后不丢；
+10. 保持 Dashboard 运行。
 
-## 5. 其他日志
+浏览器能力可用时，不允许只说“请自行打开 URL”。
 
-### `application_log.csv`
-至少记录：
+## 6. 与现有 Dashboard 的关系
 
-```csv
-timestamp,job_id,event,stage,evidence,notes
-```
+现有 Dashboard 的 UI/交互是产品资产：只做最小兼容，不用模板覆盖，不为了新文件命名重做前端。完整数据契约见 `../docs/dashboard-integration.md`。
 
-### `follow_up.csv`
-至少记录：
+## 7. 完成条件
 
-```csv
-event_id,job_id,date,time,event_type,notes,status
-```
-
-### `blockers.csv`
-至少记录：
-
-```csv
-blocker_id,job_id,type,reason,next_action,status,created_at,resolved_at
-```
-
-若现有 Dashboard 使用不同表头，优先做一次兼容映射 / 迁移，不要无备份强改。
-
-## 6. 状态推进
-
-用户点击“已投递”：
-- 更新岗位 status；
-- 记录 applied_date；
-- 追加 application log。
-
-新增笔试 / 面试日程：
-- 写 follow_up；
-- 更新 current_stage；
-- 必要时将 status 映射到 Assessment / Interview。
-
-结束：
-- Offer / Rejected / Closed 如实更新。
-
-## 7. Phase 5 完成条件
-
-- 阶段 4 的正式岗位已经进入工作区；
-- 重复运行不会重复新增同一岗位；
-- 用户能持续追踪投递、日程、面试与阻塞；
-- 若有 Dashboard，Dashboard 与工作区之间只有一个数据真源；
-- 页面操作真实写回，不只改前端内存；
-- 飞书若启用，不改变上述数据所有权。
+- 阶段产物在同一 workspace；
+- 同岗位重复运行不重复新增；
+- 页面读取和写回真实持久化；
+- Dashboard 已实际打开验证；
+- 飞书失败不影响本地流程。
