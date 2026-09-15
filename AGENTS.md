@@ -73,16 +73,26 @@ Phase 1 后续文件直接落到该工作区。
 读取：
 - `references/role-research.md`
 - `references/company-tiering.md`
-- 小而美分支按需读取 `references/small-company-discovery.md`
+- 构建“小而美 / 早期优质”分支时 **MUST** 读取 `references/small-company-discovery.md`
 - 中厂候选发现可读取 `assets/company-seeds.md`
 
 必须产出：
 - `01_企业树.md`
 - `02_<行业><岗位>核心能力.md`
 
-企业树包含：头部/标杆、中厂/成长型、小而美/早期优质。种子名单只用于发现，必须实时验证。
+**企业树不是一次搜索后自动分类。必须分别执行三个 discovery pass：**
 
-能力建模以 **5 家头部/标杆企业 × 各 1 份当前代表性完整官方 JD** 为 Benchmark；未实际打开完整 JD，Gate A 不通过。
+1. 头部 / 标杆企业 discovery；
+2. 中厂 / 成长型企业 discovery；
+3. 小而美 / 早期优质企业 discovery。
+
+三个 pass 全部执行后，再合并候选、企业实体去重、按 `company-tiering.md` 复核层级并写入 `01_企业树.md`。
+
+小而美 discovery 必须按 `small-company-discovery.md` 的可执行 SOP 完成：搜索边界 → 多渠道候选发现 → 去重 → 业务真实性初筛 → 公司质量验证 → 目标岗位价值验证 → Evidence Status/Freshness → Quality Gate → 入树。
+
+**禁止因为已经找到 5 家头部企业、已经拿到 5 份 JD，或头部结果“够用了”，而跳过中厂或小而美。** 如果某层样本不足，允许少，但必须记录搜索过的来源、候选数量、主要排除原因和样本限制，不得用空白假装完成，也不得为了凑数乱塞公司。
+
+只有三层企业发现均完成并通过企业树完成门槛后，才能从头部/标杆层选择 **5 家不同企业 × 各 1 份当前代表性完整官方 JD** 做 Benchmark。未实际打开完整 JD，Gate A 不通过。
 
 ### Phase 2 · 个人经历
 

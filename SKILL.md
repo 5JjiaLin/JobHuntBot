@@ -1,6 +1,6 @@
 ---
 name: complete-job-search-pipeline
-version: "1.1.2"
+version: "1.1.3"
 description: >
   完整求职流水线：从目标岗位与行业定位开始，建立企业树和标杆 JD 能力模型，基于真实经历生成正式简历，
   再验证当前具体岗位并进入持续投递 Dashboard。适用于“帮我完整找工作”“研究岗位后做简历再找职位”
@@ -39,16 +39,20 @@ metadata:
 
 ### Phase 1 · Industry, company tree & capability model
 
-读取 [role-research.md](references/role-research.md) 和 [company-tiering.md](references/company-tiering.md)。小而美分支按需读取 [small-company-discovery.md](references/small-company-discovery.md)，中厂候选可参考 [company-seeds.md](assets/company-seeds.md)。
+读取 [role-research.md](references/role-research.md) 和 [company-tiering.md](references/company-tiering.md)。构建“小而美 / 早期优质”分支时必须读取 [small-company-discovery.md](references/small-company-discovery.md)；中厂候选可参考 [company-seeds.md](assets/company-seeds.md)。
 
 流程：
 
-`目标岗位 → 行业识别 → 用户确认行业 → 企业树 → 5 家头部 Benchmark JD → 核心能力模型`
+`目标岗位 → 行业识别 → 用户确认行业 → 三层企业独立发现 → 合并/去重/分层 → 企业树完成 → 5 家头部 Benchmark JD → 核心能力模型`
 
-企业树三层：
+企业树三层必须分别执行 discovery，不得用一次综合搜索后直接让 Agent 自行分类：
 - 头部 / 标杆；
 - 中厂 / 成长型；
 - 小而美 / 早期优质。
+
+三层企业发现全部执行并写入 `01_企业树.md` 后，才能从头部/标杆层选择 5 家 Benchmark 企业。不得因为已经找到 5 家头部企业或 5 份 JD，就跳过中厂或小而美。
+
+小而美不是“搜小公司”：必须按 `small-company-discovery.md` 完成候选发现、业务真实性核验、公司质量验证、目标岗位价值验证、证据状态/时效判断和 Quality Gate。融资、资质、榜单、VC、媒体报道等单一信号只能用于发现，不能直接升级为“小而美”。
 
 Benchmark：5 家不同头部/标杆企业，各 1 份当前代表性完整官方 JD。能力结论保留来源，不机械数关键词。
 
@@ -56,7 +60,9 @@ Benchmark：5 家不同头部/标杆企业，各 1 份当前代表性完整官�
 - `01_企业树.md`
 - `02_<行业><岗位>核心能力.md`
 
-**Gate A：**行业已确认；企业树有可解释证据；5 份 Benchmark JD 已实际打开（或明确记录不可得限制）；Core/Hard Gates/Common/Plus 可追溯。否则不进入确定版简历。
+**企业树完成门槛：**三层均已执行独立发现；候选合并去重；每层有可解释证据；小而美已完成 Quality Gate；数量不足时记录搜索覆盖、排除原因和样本限制。未满足时不得开始 Benchmark JD。
+
+**Gate A：**行业已确认；企业树完成门槛已通过；5 份 Benchmark JD 已实际打开（或明确记录不可得限制）；Core/Hard Gates/Common/Plus 可追溯。否则不进入确定版简历。
 
 ### Phase 2 · Experience source & capability-guided mining
 
