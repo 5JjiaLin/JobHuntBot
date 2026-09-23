@@ -1,147 +1,119 @@
 # JobHuntBot
 
-**Turn your AI coding agent into a persistent job-search system — from industry-aware company research and benchmark JDs to a production-ready resume, live job matching, and application tracking.**
+**Turn your AI coding agent into a persistent job-search system — from industry research and benchmark JDs to evidence-based resumes, live job matching, and application tracking.**
 
-把 Codex / Claude Code 从“帮我改一次简历”，变成一个持续运行的完整求职系统。
+把 Codex / Claude Code 从“帮我改一次简历”，变成一个持续运行的完整求职 Agent Harness。
 
-[![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
-![Node](https://img.shields.io/badge/node-%3E%3D%2020-339933?logo=node.js&logoColor=white)
-![Local-first](https://img.shields.io/badge/local--first-no%20cloud-orange)
-![Storage](https://img.shields.io/badge/storage-CSV%20files-lightgrey)
-![Version](https://img.shields.io/badge/version-1.1.0-8A2BE2)
+## What is JobHuntBot?
 
-**中文说明 → [docs/README.zh-CN.md](docs/README.zh-CN.md)**
+JobHuntBot is a job-search Agent Harness designed for AI coding agents.
 
-![JobHuntBot dashboard](docs/assets/dashboard-hero.png)
+It turns the job search process into a structured workflow:
 
-> Screenshot shows the bundled demo workspace (`examples/demo-workspace/`) — fictional companies only.
+1. Analyze target role requirements
+2. Research industries and companies
+3. Build company trees (head / growth / small-but-high-quality)
+4. Extract capability models from benchmark JDs
+5. Mine real experience evidence
+6. Generate tailored resumes
+7. Verify live jobs and track applications
 
-## What it does
+The core idea is simple: **resume is not written first. It is derived from market requirements and your proven evidence.**
 
-```mermaid
-flowchart LR
-    A[Target Role] --> B[Target Industry]
-    B --> C[Company Tree]
-    C --> D[5 Benchmark JDs]
-    D --> E[Capability Model]
-    E --> F[Experience Evidence]
-    F --> G[Production Resume]
-    G --> H[Live Job Matching]
-    H --> I[Application Dashboard]
-    I --> J[Optional Feishu Sync]
-```
+## How to Use
 
-JobHuntBot keeps state between the steps most tools treat as isolated: what the market actually asks for, what you can honestly prove, which companies matter in the chosen industry, which current roles pass hard gates, and what happened after you applied.
+### Quick Start
 
-## Why JobHuntBot
-
-| Typical AI job tool | JobHuntBot |
-|---|---|
-| Starts from one pasted JD | Starts from **role → industry → company tree → 5 benchmark official JDs** |
-| Treats “big / mid / small” as headcount | Tiers companies relative to the **target industry and role** |
-| Finds random startups | Has a dedicated **small-but-high-quality discovery + evidence gate** |
-| Invents plausible-sounding experience | Builds an **evidence matrix** from real experience first |
-| Produces only resume text | Produces structured resume content and, when tooling supports it, a **formatted DOCX template-based resume** |
-| Ranks by keyword overlap | **Hard gates first**, then explainable 0–100 scoring |
-| Quotes stale search results | Re-opens postings in a **real browser** for verification |
-| Ends at “here are some links” | Opens a local **application dashboard** backed by your workspace |
-
-## Features
-
-### Industry-aware Role Intelligence
-First identifies where the role exists, asks for the target industry, builds a three-layer company tree, then models the role from five benchmark JDs from head/benchmark companies.
-
-### Company Tree
-- Head / benchmark companies
-- Growth / mid-size companies
-- Small-but-high-quality / early high-quality companies
-
-`assets/company-seeds.md` accelerates discovery but never acts as a permanent classification truth source.
-
-### Small-but-high-quality Discovery
-Uses official qualification lists, industry/regional rankings, venture/industry sources, and industry-specific signals, then applies an evidence-aware quality gate. One funding round, award, ranking, or government badge is never enough by itself.
-
-### Evidence-based Production Resume
-Capability model → verified experience → evidence matrix → STAR / reverse-STAR → standard one-page resume structure → truthfulness audit. The public DOCX template contains placeholders only and leaves the photo position blank.
-
-### Live Job Matching
-Returns to the Phase 1 company tree and verifies current openings in the correct campus/intern or experienced-hire channel.
-
-### Local Application Workspace + Dashboard
-All artifacts and job state live under `workspace/`. Phase 5 starts the existing dashboard and, when browser control is available, opens and verifies it instead of merely printing a localhost URL.
-
-## Quick Start
+Clone the repository:
 
 ```bash
 git clone https://github.com/5JjiaLin/JobHuntBot.git
 cd JobHuntBot
 ```
 
-Then point your coding agent at the repo and say:
+Then load this project into Codex / Claude Code and copy the following prompt:
 
 ```text
-Read AGENTS.md and SKILL.md.
-Run JobHuntBot from the beginning. Do not skip phases.
+使用这个项目作为我的求职 Agent Harness：
+
+https://github.com/5JjiaLin/JobHuntBot
+
+请先读取项目中的 AGENTS.md 和 SKILL.md，理解完整工作流程。
+
+然后严格按照项目定义的 Phase 流程引导我完成求职。
+
+不要跳过阶段，不要直接生成简历。
+从 Phase 1 开始，先询问我的目标岗位。
 ```
 
-The first visible question should only ask for your target role. Recruitment track is asked later, immediately before live job search.
+The agent should first load the workflow definition, then execute each Phase step by step.
 
-### Dashboard only
+## Workflow
 
-```bash
-npm run init:workspace -- "AI Product Manager"
-node dashboard/server.js
-# http://localhost:8420/dashboard.html
-```
-
-No database and no cloud service. The server binds to `127.0.0.1` only.
-
-## Workflow & outputs
-
-| Phase | What happens | Output |
+| Phase | Process | Output |
 |---|---|---|
-| 1 | Role → industry → company tree → 5 benchmark JDs → capability model | `01_企业树.md`, `02_<行业><岗位>核心能力.md` |
-| 2 | Verify or mine real experience | `03_个人经历.md` |
-| 3 | Evidence matrix → resume → truthfulness audit | `04_证据矩阵.md`, `05_简历.md`, optional/available `05_简历.docx`, `06_简历审计.md` |
-| 4 | Recruitment track → company tree → browser-verified openings → hard gate → S/A/B | `jobs.csv`, `07_投递优先级.md` |
-| 5 | Validate workspace → start/open/verify dashboard | running local Dashboard |
+| Phase 1 | Role → Industry → Company Tree → Benchmark JDs → Capability Model | 企业树、行业岗位核心能力 |
+| Phase 2 | Real experience discovery and verification | 个人经历 |
+| Phase 3 | Evidence matrix → STAR → Resume generation → Truth audit | 证据矩阵、简历 |
+| Phase 4 | Recruitment track → Live job verification → Application priority | 投递清单 |
+| Phase 5 | Workspace initialization → Dashboard | 求职 Dashboard |
 
-Detailed playbooks live in `references/`; `SKILL.md` stays the execution contract rather than becoming a knowledge dump.
+## Core Features
 
-## Privacy
+### Industry-aware Role Intelligence
 
-- `workspace/` is gitignored.
-- Silent bootstrap must not scan `~/Downloads`, `~/Desktop`, `~/Documents`, Home, or unrelated projects for personal job-search files.
-- External personal files are read only after the user supplies them or explicitly authorizes access in Phase 2.
-- The public resume template contains placeholders, not personal identity data.
-- The dashboard only talks to `127.0.0.1`; no telemetry or cloud component.
-- The agent must not bypass logins, CAPTCHAs, permissions, or paywalls.
+先确定岗位所在行业，再研究该行业企业和岗位要求，而不是从一份 JD 开始。
 
-## Project structure
+### Company Tree
+
+企业按照目标行业和岗位划分：
+
+- Head / benchmark companies
+- Growth / mid-size companies
+- Small-but-high-quality companies
+
+### Small-but-high-quality Discovery
+
+通过：
+
+- 官方资质认证
+- 行业榜单
+- 创投/产业数据库
+- 业务真实性验证
+
+寻找低知名度但具备竞争力的企业。
+
+### Evidence-based Resume
+
+能力模型 → 真实经历 → 证据矩阵 → STAR → 简历。
+
+避免 AI 编造经历，只优化真实能力表达。
+
+### Local Workspace Dashboard
+
+所有求职数据保存在本地 workspace，支持岗位跟踪和投递管理。
+
+## Project Structure
 
 ```text
 JobHuntBot/
 ├── AGENTS.md
 ├── SKILL.md
-├── assets/             # experience prompt, company seeds, resume template
-├── dashboard/          # existing zero-dependency local dashboard
-├── references/         # per-phase playbooks, loaded on demand
-├── scripts/            # workspace scaffolding and tests
-├── templates/          # CSV/table templates
-├── docs/
-├── evals/
-├── examples/
-└── workspace/          # your data, local + gitignored
+├── references/
+├── assets/
+├── dashboard/
+├── templates/
+├── scripts/
+└── workspace/
 ```
 
-## Credits
+## Privacy
 
-- **Yvonne He** — original ApplyPilot project.
-- **DanielPan12** — JobHuntBot adaptation that carried the concept forward.
-- **5JjiaLin** — rebuilt and integrated the current local-first workflow and dashboard.
-
-See [LICENSE](LICENSE) for the copyright chain.
+- workspace 默认不上传 GitHub。
+- 不会自动扫描用户个人文件。
+- 个人经历只在用户授权后读取。
+- 不绕过登录、验证码、权限限制。
 
 ## License
 
-[MIT](LICENSE)
+MIT
